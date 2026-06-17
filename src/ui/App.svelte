@@ -17,6 +17,9 @@ let victory = $state(false);
 let victoryData = $state<{ score: number; fragments: number; total: number; time: number; bestScore: number } | null>(null);
 let showSettings = $state(false);
 let volume = $state(0.7);
+let level = $state(1);
+let showTransition = $state(false);
+let transitionLabel = $state('');
 // Minimap state
 let minimapData = $state<{ x: number; y: number; yaw: number } | null>(null);
 // Subscribe via raf polling
@@ -42,6 +45,11 @@ let minimapCanvas: HTMLCanvasElement;
       setSettings: (v: boolean) => { showSettings = v; },
       setVolume: (v: number) => { volume = v; },
       getVolume: () => volume,
+      setLevel: (n: number) => { level = n; },
+      setTransition: (v: boolean, label?: string) => {
+        showTransition = v;
+        transitionLabel = label ?? '';
+      },
     };
     (window as any).__hud = api;
     return () => { /* keep global on unmount */ };
@@ -176,6 +184,7 @@ let minimapCanvas: HTMLCanvasElement;
   <div class="hud-top-left">
     <div class="hud-label">SECTOR</div>
     <div class="hud-value">{sector}</div>
+    <div class="hud-level">LEVEL {level.toString().padStart(2, '0')}</div>
   </div>
 
   <div class="hud-top-right">
@@ -218,6 +227,13 @@ let minimapCanvas: HTMLCanvasElement;
 
   {#if lore}
     <div class="hud-lore">{lore}</div>
+  {/if}
+
+  {#if showTransition}
+    <div class="transition-overlay">
+      <div class="transition-label">{transitionLabel}</div>
+      <div class="transition-sub">// reinitializing grid //</div>
+    </div>
   {/if}
 
   {#if showSettings}
@@ -350,6 +366,13 @@ let minimapCanvas: HTMLCanvasElement;
     font-size: 10px;
     color: var(--green);
     text-shadow: 0 0 6px var(--green);
+    letter-spacing: 1.5px;
+    margin-top: 4px;
+  }
+  .hud-level {
+    font-size: 10px;
+    color: var(--orange);
+    text-shadow: 0 0 6px var(--orange);
     letter-spacing: 1.5px;
     margin-top: 4px;
   }
@@ -546,6 +569,37 @@ let minimapCanvas: HTMLCanvasElement;
     opacity: 0.5;
     margin-top: 10px;
     letter-spacing: 2px;
+  }
+  .transition-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    z-index: 20;
+    animation: fade-in 0.3s ease;
+  }
+  .transition-label {
+    font-size: 64px;
+    color: var(--orange);
+    text-shadow: 0 0 32px var(--orange);
+    letter-spacing: 12px;
+    margin-bottom: 8px;
+    animation: transition-pulse 0.9s ease-in-out infinite;
+  }
+  @keyframes transition-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .transition-sub {
+    font-size: 12px;
+    color: var(--cyan);
+    opacity: 0.7;
+    letter-spacing: 4px;
   }
   .victory-overlay {
     position: absolute;

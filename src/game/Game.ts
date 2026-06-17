@@ -20,6 +20,19 @@ import { AudioBus } from './Audio';
 import { Component, generateComponents } from './Components';
 import { PALETTE } from './palette';
 
+// Re-seed Math.random with a tiny mulberry32 PRNG so the procedural world
+// generates a DIFFERENT layout per level. Called from startNextLevel().
+function seedRandom(seed: number) {
+  let s = seed | 0;
+  (Math as any).random = function () {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 type HudHandle = {
   setScore: (n: number) => void;
   setBestScore: (n: number) => void;
@@ -35,6 +48,8 @@ type HudHandle = {
   setSettings: (v: boolean) => void;
   setVolume: (v: number) => void;
   getVolume: () => number;
+  setLevel: (n: number) => void;
+  setTransition: (v: boolean, label?: string) => void;
 };
 
 export class Game {
@@ -92,6 +107,8 @@ export class Game {
   private difficultyWave1 = 0;
   private difficultyWave2 = 0;
   private lastFragmentsCollected = 0;
+  // Level loop
+  private level = 1;
 
   constructor(root: HTMLElement, hud: any) {
     this.rootEl = root;
@@ -117,6 +134,86 @@ export class Game {
 
   /** Public: the AudioBus instance so the HUD can adjust volume. */
   getAudio() { return this.audio; }
+
+  /** Multiplier applied to enemy hp / damage as level rises. */
+  get difficultyMul(): number { return 1 + (this.level - 1) * 0.5; }
+
+  /** Start a new level: clear field, bump level, regenerate
+   *  components, more enemies, harder boss. */
+  private startNextLevel() {
+    this.level++;
+    this.hud.setTransition(false);
+    this.hud.setLevel(this.level);
+    this.hud.setBossHp(0, 0);
+
+    // Heal hero to full and clear boss state
+    this.hero.hp = this.hero.maxHp;
+    this.hud.setHp(this.hero.hp, this.hero.maxHp);
+    this.boss = null;
+    this.bossSpawned = false;
+    this.bossDefeated = false;
+
+    // Clear the old boss projectiles (they'd linger otherwise)
+    for (const e of this.enemies) {
+      for (const p of e.projectiles) p.mesh.parent?.remove(p.mesh);
+    }
+
+    // Remove old components from the scene
+    for (const c of this.components) this.scene.remove(c.group);
+    // Re-seed: we want different layouts per level, so we add a level
+    // offset to Math.random by drawing a new random seed.
+    // Quickest way: shuffle by adding a new random factor to existing
+    // generator via a tiny PRNG seeded by level.
+    seedRandom(this.level * 9173 + 42);
+    this.components = generateComponents();
+    for (const c of this.components) this.scene.add(c.group);
+
+    // Re-populate fragments (saving already-collected ones is OK; they
+    // are visually hidden but we keep them in this.fragments).
+    for (const f of this.fragments) {
+      f.collected = false;
+      f.group.visible = true;
+    }
+    this.fragmentsCollected = 0;
+    this.hud.setFragments(0, this.fragmentsTotal);
+
+    // Add MORE enemies (drones, chargers) per level
+    this.spawnExtraEnemies();
+
+    // Reset the hero to the hub
+    this.hero.group.position.set(0, 0, 0);
+    this.hero.hp = this.hero.maxHp;
+    this.hero.hurt(0);  // noop reset of any timers (e.g. dash state)
+
+    // Music + UI
+    this.hud.setLore(`// LEVEL ${this.level} // the grid has reconfigured. stay sharp.`);
+    this.audio.ambientStart();
+    this.cine.play([
+      { focus: new THREE.Vector3(0, 0, -45), yaw: Math.PI, pitch: 0.45, distance: 22, t: 0 },
+      { focus: new THREE.Vector3(0, 0, 0), yaw: this.camCtl.yaw, pitch: 0.6, distance: 28, t: 1.4 },
+    ]);
+  }
+
+  /** Spawn extra enemies based on the current level. */
+  private spawnExtraEnemies() {
+    const extras = this.level - 1;
+    if (extras < 1) return;
+    const p = this.hero.group.position;
+    for (let i = 0; i < extras; i++) {
+      const a = (i / extras) * Math.PI * 2 + Math.random();
+      const r = 25 + Math.random() * 10;
+      const kinds: ('hunter' | 'charger' | 'drone')[] = ['hunter', 'charger', 'drone'];
+      const k = kinds[Math.floor(Math.random() * kinds.length)];
+      const x = p.x + Math.cos(a) * r;
+      const z = p.z + Math.sin(a) * r;
+      if (k === 'drone') {
+        this.enemies.push(this.makeEnemy('drone', new THREE.Vector3(x, 0, z), new THREE.Vector3(x, 0, z)));
+      } else {
+        const b = new THREE.Vector3(x + (Math.random() - 0.5) * 8, 0, z + (Math.random() - 0.5) * 8);
+        this.enemies.push(this.makeEnemy(k, new THREE.Vector3(x, 0, z), b));
+      }
+    }
+  }
 
   private setupRenderer() {
     this.renderer = new THREE.WebGLRenderer({
@@ -192,6 +289,7 @@ export class Game {
     this.hud.setScore(0);
     this.hud.setSector('GRID HUB');
     this.hud.setBossHp(0, 0);
+    this.hud.setLevel(this.level);
     this.hud.setLore('WASD move · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
     this.hud.setTutorial(true);
   }
@@ -271,6 +369,22 @@ export class Game {
     const orbit = this.input.consumeOrbit();
     if (orbit.dx !== 0 || orbit.dy !== 0) this.camCtl.applyOrbit(orbit.dx, orbit.dy);
 
+    // Level-cleared transition: if the boss is dead and we haven't yet
+    // triggered the next level, do it now.
+    if (this.boss && !this.boss.alive && !this.victory) {
+      this.victory = true;
+      this.score += 2000;
+      this.hud.setScore(this.score);
+      this.particles.burst(this.boss.group.position.clone().setY(2), PALETTE.orange, 200, 12, 1.5);
+      this.audio.boom();
+      this.audio.victory();
+      this.audio.ambientStop();
+      this.saveBestScore(this.score);
+      this.hud.setTransition(true, `LEVEL ${this.level} CLEARED`);
+      setTimeout(() => this.startNextLevel(), 2800);
+      return;
+    }
+
     const pulse = this.world.getPulse();
     this.world.update(dt, t);
 
@@ -294,9 +408,6 @@ export class Game {
     // Cinematic: if running, override hero update and camera follow
     if (this.cine.running) {
       this.cine.update(dt, this.t);
-      // Lock hero position (no input during cinematic)
-    } else {
-      // Normal play
     }
 
     // Fragments
@@ -412,25 +523,7 @@ export class Game {
         this.audio.hit();
         this.shake(0.3, 0.2);
         this.particles.burst(this.boss.group.position.clone().setY(2), 0xffffff, 30, 5, 0.4);
-        if (!this.boss.alive) {
-          this.score += 2000;
-          this.hud.setScore(this.score);
-          this.particles.burst(this.boss.group.position.clone().setY(2), PALETTE.orange, 200, 12, 1.5);
-          this.audio.boom();
-          this.audio.victory();
-          const elapsed = (performance.now() - this.startTime) / 1000;
-          this.hud.setLore('// the grid acknowledges your victory. you may rest now.');
-          this.victory = true;
-          this.audio.ambientStop();
-          this.saveBestScore(this.score);
-          this.hud.setVictory(true, {
-            score: this.score,
-            fragments: this.fragmentsCollected,
-            total: this.fragmentsTotal,
-            time: elapsed,
-            bestScore: this.bestScore,
-          });
-        }
+        // Level transition is detected at the top of tick() (next frame)
       }
       // Boss contact
       if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 2.5) {
@@ -452,7 +545,7 @@ export class Game {
 
   private spawnBoss() {
     this.bossSpawned = true;
-    this.boss = new Boss(new THREE.Vector3(0, 0, -90));
+    this.boss = new Boss(new THREE.Vector3(0, 0, -90), this.level);
     this.scene.add(this.boss.group);
     this.hud.setBossHp(this.boss.hp, this.boss.maxHp);
     this.audio.warning();
