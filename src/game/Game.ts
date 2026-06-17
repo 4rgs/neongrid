@@ -793,15 +793,18 @@ export class Game {
         this.shake(0.25, 0.3);
         if (dead) this.startGameOver();
       }
+      // Projectiles from this enemy (turrets, hunters, drones).
+      // Radius 2.0m is generous: the projectile is small (0.22m sphere)
+      // moving at 14 m/s, so we give the player a fair hitbox.
       for (const p of e.projectiles) {
-        if (p.mesh.position.distanceTo(this.hero.group.position) < 1.4) {
+        if (p.mesh.position.distanceTo(this.hero.group.position) < 2.0) {
           this.damageThisLevel++;
           p.life = 0;
-          this.particles.burst(p.mesh.position.clone(), PALETTE.cyan, 14, 3, 0.4);
+          this.particles.burst(p.mesh.position.clone(), PALETTE.cyan, 18, 4, 0.5);
           const dead = this.hero.hurt(1);
           this.hud.setHp(this.hero.hp, this.hero.maxHp);
           this.audio.hurt();
-          this.shake(0.2, 0.25);
+          this.shake(0.25, 0.3);
           if (dead) this.startGameOver();
         }
       }
@@ -818,13 +821,16 @@ export class Game {
         this.particles.burst(this.boss.group.position.clone().setY(2), 0xffffff, 30, 5, 0.4);
         // Level transition is detected at the top of tick() (next frame)
       }
-      // Boss contact
-      if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 2.5) {
+      // Boss contact — INSTAKILL. Touching the master process ends the
+      // run immediately (the user wanted a more aggressive threat).
+      if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 4.5) {
         this.damageThisLevel++;
-        const dead = this.hero.hurt(1);
+        const dead = this.hero.hurt(999);   // instakill
         this.hud.setHp(this.hero.hp, this.hero.maxHp);
         this.audio.hurt();
-        this.shake(0.4, 0.4);
+        this.shake(0.6, 0.7);
+        // Massive particles for the boss-touched-the-hero moment
+        this.particles.burst(this.hero.group.position.clone().setY(1), PALETTE.red, 200, 12, 1.4);
         if (dead) this.startGameOver();
       }
     }

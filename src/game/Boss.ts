@@ -150,7 +150,10 @@ export class Boss {
     if (!this.alive || this.hitFlashT > 0) return false;
     const a = this.group.position; const b = point;
     const dx = a.x - b.x, dz = a.z - b.z;
-    return Math.hypot(dx, dz) < 2.5;
+    // Hittable radius: matches the boss' visual footprint plus some
+    // margin so the disc-whip feels reliable. The boss group includes
+    // the core, ring, spikes, and base; we keep it generous (4m).
+    return Math.hypot(dx, dz) < 4.0;
   }
 
   update(dt: number, t: number, playerPos: THREE.Vector3) {
