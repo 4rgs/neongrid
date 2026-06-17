@@ -433,15 +433,14 @@ export class Game {
     }
     this.replay.clear();
 
-    // Auto-restart the run 3s after the player confirms their name.
-    // The user wanted the level to restart on its own after the
-    // "identify yourself" screen, so they don't have to click PLAY
-    // AGAIN manually. The bestScore persists in localStorage and is
-    // shown in the HUD on the new run.
-    this.hud.setLore('// restart in 3 seconds //');
-    setTimeout(() => {
-      if (this.gameOver) this.restartRun();
-    }, 3000);
+    // Auto-restart the run after the player confirms their name.
+    // The user wanted the level to restart right after the "identify
+    // yourself" screen with no extra waiting, so they don't have to
+    // click PLAY AGAIN manually. We close the modal immediately and
+    // run restartRun synchronously in the same microtask. The best
+    // score persists in localStorage and is shown in the HUD on the
+    // new run.
+    this.restartRun();
   }
 
   /**
