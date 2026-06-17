@@ -1,0 +1,14 @@
+name = "neongrid"
+compatibility_date = "2025-09-01"
+pages_build_output_dir = "./dist"
+
+# Build config (Cloudflare reads this from wrangler.toml; the actual
+# build is performed by `npm run build` before `wrangler pages deploy`).
+#
+# To deploy:
+#   npm run build
+#   npx wrangler pages deploy dist --project-name neongrid
+#
+# First time setup (one-off):
+#   npx wrangler login
+#   npx wrangler pages project create neongrid

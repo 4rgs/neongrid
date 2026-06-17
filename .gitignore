@@ -1,0 +1,31 @@
+node_modules
+dist
+.vite
+*.log
+.DS_Store
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# OS
+Thumbs.db
+
+# Editor backup
+*~
+*.bak
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# Temporary
+tmp/
+.temp/
