@@ -56,6 +56,9 @@ type HudHandle = {
   setAchievements: (ids: AchievementId[]) => void;
   setGameOverScore: (score: number, level: number, bestScore: number) => void;
   setLeaderboard: (entries: any[], globalRank: number | null) => void;
+  askForName: (defaultName: string) => void;
+  submitWithName: (name: string) => void;
+  skipName: () => void;
 };
 
 export class Game {
@@ -290,7 +293,9 @@ export class Game {
     this.particles.burst(this.hero.group.position.clone().setY(1.5), PALETTE.cyan, 40, 6, 0.6);
   }
 
-  /** Game over: save high score, persist, respawn at last level. */
+  /** Game over: pause and ask for the player's handle so the score
+   *  can be attributed correctly in the leaderboard. The actual
+   *  leaderboard submission happens in submitWithName(name). */
   private startGameOver() {
     if (this.gameOver) return;
     this.gameOver = true;
@@ -299,25 +304,33 @@ export class Game {
     this.audio.hurt();
     this.shake(0.5, 0.6);
 
-    // Speedrunner check (level 1 finished)
-    if (this.level === 1) {
-      const elapsed = (performance.now() - this.runStartTime) / 1000;
-      if (elapsed < 60) this.unlockAchievement('speedrunner');
-    }
+    // Show the name-entry modal with the last-used name as default.
+    // The user can confirm (Enter) or skip; either path lands on
+    // submitWithName() which validates and POSTs to the leaderboard.
+    this.hud.askForName(this.save.run.heroName);
 
-    // Pacifist: finished a level without dying (we're at the boss or just killed it; we know if hero.hp < max at any point in this level)
-    if (this.damageThisLevel === 0 && this.enemiesKilledThisLevel > 0) {
-      this.unlockAchievement('pacifist');
-    }
+    // Persist the run state regardless of the name (upgrades, level).
+    this.save.run.currentLevel = this.level;
+    saveRun(this.save.run);
+  }
 
-    // Best score + high-score table
+  /** Called by the HUD once the player has entered a name (or skipped).
+   *  Validates the name, updates the saved run, and POSTs the score
+   *  to the global leaderboard (with localStorage fallback). */
+  submitWithName(name: string) {
+    const clean = (name || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16);
+    const finalName = clean || 'PROGRAMMER';
+    this.save.run.heroName = finalName;
+    saveRun(this.save.run);
+
+    // Best score + local high-score table (offline fallback)
     const newBest = Math.max(this.bestScore, this.score);
     this.save.bestScore = newBest;
     saveBestScore(newBest);
 
     const totalTime = (performance.now() - this.runStartTime) / 1000;
     const entry = {
-      name: this.save.run.heroName,
+      name: finalName,
       score: this.score,
       level: this.level,
       time: totalTime,
@@ -326,29 +339,16 @@ export class Game {
     this.save.highScores = pushHighScore(this.save.highScores, entry);
     saveHighScores(this.save.highScores);
     this.hud.setBestScore(newBest);
-
     this.hud.setGameOverScore(this.score, this.level, newBest);
-    this.hud.setGameOver(true);
 
     // Submit to global leaderboard (async, non-blocking). When it
-    // resolves we update the HUD with the new top-10 + the player's
-    // global rank. If the API is unreachable we just use the
-    // local top-5 fallback.
-    submitScore({
-      name: this.save.run.heroName,
-      score: this.score,
-      level: this.level,
-      time: totalTime,
-    }).then((top) => {
+    // resolves the HUD updates with the top-10 + global rank.
+    submitScore(entry).then((top) => {
       this.leaderboard = top;
-      const me = top.find((e) => e.name === this.save.run.heroName && e.score === this.score);
+      const me = top.find((e) => e.name === finalName && e.score === this.score);
       this.globalRank = me ? me.rank : null;
       this.hud.setLeaderboard(top, this.globalRank);
     }).catch(() => { /* ignored */ });
-
-    // Save the run state (level reached + upgrades) so respawn can restore.
-    this.save.run.currentLevel = this.level;
-    saveRun(this.save.run);
   }
 
   /** Respawn at the same level the player died on. */

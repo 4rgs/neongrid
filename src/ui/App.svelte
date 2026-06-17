@@ -31,6 +31,9 @@ let justUnlockedName = $state('');
 let gameOverScore = $state(0);
 let gameOverLevel = $state(1);
 let gameOverBest = $state(0);
+// Name-entry modal
+let askForName = $state(false);
+let pendingName = $state('PROGRAMMER');
 // Global leaderboard
 let leaderboard = $state<{ rank: number; name: string; score: number; level: number; time: number }[]>([]);
 let globalRank = $state<number | null>(null);
@@ -86,6 +89,18 @@ let minimapCanvas: HTMLCanvasElement;
         leaderboard = entries || [];
         globalRank = rank;
         leaderboardLabel = rank ? 'GLOBAL' : 'LOCAL';
+      },
+      askForName: (defaultName: string) => {
+        pendingName = defaultName || 'PROGRAMMER';
+        askForName = true;
+      },
+      submitWithName: (name: string) => {
+        (window as any).__game?.submitWithName(name);
+        askForName = false;
+      },
+      skipName: () => {
+        (window as any).__game?.submitWithName(pendingName);
+        askForName = false;
       },
     };
     (window as any).__hud = api;
@@ -311,6 +326,29 @@ let minimapCanvas: HTMLCanvasElement;
 
   {#if lore}
     <div class="hud-lore">{lore}</div>
+  {/if}
+
+  {#if askForName}
+    <div class="name-overlay">
+      <div class="name-card">
+        <div class="name-title">// IDENTIFY YOURSELF //</div>
+        <div class="name-sub">enter your handle for the leaderboard</div>
+        <input
+          class="name-input"
+          type="text"
+          maxlength="16"
+          value={pendingName}
+          oninput={(e) => pendingName = (e.target as HTMLInputElement).value}
+          onkeydown={(e) => { if (e.key === 'Enter') { (window as any).__hud?.submitWithName(pendingName); askForName = false; } }}
+          placeholder="PROGRAMMER"
+        />
+        <div class="name-hint">A-Z 0-9 _ - · 1-16 chars</div>
+        <div class="name-actions">
+          <button class="name-btn primary" onclick={() => { (window as any).__hud?.submitWithName(pendingName); askForName = false; }}>CONFIRM</button>
+          <button class="name-btn" onclick={() => { (window as any).__hud?.skipName(); }}>SKIP</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if showTransition}
@@ -746,6 +784,83 @@ let minimapCanvas: HTMLCanvasElement;
     margin-top: 10px;
     letter-spacing: 2px;
   }
+  .name-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(3px);
+    pointer-events: auto;
+    z-index: 30;
+    animation: fade-in 0.3s ease;
+  }
+  .name-card {
+    border: 1px solid var(--orange);
+    background: rgba(0, 20, 30, 0.95);
+    padding: 28px 36px;
+    box-shadow: 0 0 32px var(--orange);
+    min-width: 360px;
+    text-align: center;
+  }
+  .name-title {
+    font-size: 22px;
+    color: var(--orange);
+    text-shadow: 0 0 12px var(--orange);
+    letter-spacing: 6px;
+    margin-bottom: 6px;
+  }
+  .name-sub {
+    font-size: 11px;
+    color: var(--cyan);
+    opacity: 0.7;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+  }
+  .name-input {
+    width: 100%;
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    font: 20px 'Share Tech Mono', monospace;
+    padding: 10px 14px;
+    text-align: center;
+    letter-spacing: 4px;
+    text-shadow: 0 0 8px var(--cyan);
+    outline: none;
+  }
+  .name-input:focus {
+    background: rgba(0, 240, 255, 0.18);
+    box-shadow: 0 0 16px var(--cyan);
+  }
+  .name-input::placeholder { color: rgba(0, 240, 255, 0.4); }
+  .name-hint {
+    font-size: 9px;
+    color: var(--cyan);
+    opacity: 0.5;
+    letter-spacing: 2px;
+    margin: 6px 0 16px;
+  }
+  .name-actions { display: flex; gap: 12px; justify-content: center; }
+  .name-btn {
+    background: transparent;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 8px 24px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 4px;
+    cursor: pointer;
+    text-shadow: 0 0 6px var(--cyan);
+  }
+  .name-btn:hover { background: var(--cyan); color: black; text-shadow: none; }
+  .name-btn.primary {
+    border-color: var(--orange);
+    color: var(--orange);
+    text-shadow: 0 0 6px var(--orange);
+  }
+  .name-btn.primary:hover { background: var(--orange); color: black; }
   .transition-overlay {
     position: absolute;
     inset: 0;
