@@ -176,15 +176,21 @@ let minimapCanvas: HTMLCanvasElement;
   <div class="hud-top-left">
     <div class="hud-label">SECTOR</div>
     <div class="hud-value">{sector}</div>
-    {#if bestScore > 0}
-      <div class="hud-best">BEST {bestScore.toString().padStart(6, '0')}</div>
-    {/if}
   </div>
 
   <div class="hud-top-right">
-    <div class="hud-label">SCORE</div>
-    <div class="hud-value big">{score.toString().padStart(6, '0')}</div>
-    <button class="hud-settings-btn" onclick={() => showSettings = !showSettings} title="Settings (M)">⚙</button>
+    <div class="hud-minimap-vert">
+      <div class="hud-label">MAP</div>
+      <canvas bind:this={minimapCanvas} width="160" height="160"></canvas>
+    </div>
+    <div class="hud-top-right-stack">
+      <div class="hud-label">SCORE</div>
+      <div class="hud-value big">{score.toString().padStart(6, '0')}</div>
+      {#if bestScore > 0}
+        <div class="hud-best">BEST {bestScore.toString().padStart(6, '0')}</div>
+      {/if}
+      <button class="hud-settings-btn" onclick={() => showSettings = !showSettings} title="Settings (M)">⚙</button>
+    </div>
   </div>
 
   <div class="hud-bottom-left">
@@ -198,11 +204,6 @@ let minimapCanvas: HTMLCanvasElement;
   <div class="hud-bottom-right">
     <div class="hud-label">FRAGMENTS</div>
     <div class="hud-value">{fragments}/{fragmentsTotal}</div>
-  </div>
-
-  <div class="hud-minimap">
-    <div class="hud-label">MAP</div>
-    <canvas bind:this={minimapCanvas} width="160" height="160"></canvas>
   </div>
 
   {#if bossMax > 0}
@@ -373,7 +374,7 @@ let minimapCanvas: HTMLCanvasElement;
     font-size: 12px;
     opacity: 0.8;
   }
-  .hud-top-left, .hud-top-right, .hud-bottom-left, .hud-bottom-right, .hud-minimap, .hud-boss {
+  .hud-top-left, .hud-top-right, .hud-bottom-left, .hud-bottom-right, .hud-boss {
     position: absolute;
     padding: 12px 16px;
     background: rgba(0, 20, 30, 0.4);
@@ -381,20 +382,40 @@ let minimapCanvas: HTMLCanvasElement;
     backdrop-filter: blur(2px);
   }
   .hud-top-left { top: 0; left: 0; }
-  .hud-top-right { top: 0; right: 0; text-align: right; }
-  .hud-bottom-left { bottom: 0; left: 0; min-width: 180px; }
-  .hud-bottom-right { bottom: 0; right: 0; text-align: right; }
-  .hud-minimap {
-    bottom: 0;
-    left: 220px;
+  .hud-top-right {
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    backdrop-filter: none;
   }
-  .hud-minimap canvas {
+  .hud-top-right .hud-minimap-vert {
+    padding: 12px 16px;
+    background: rgba(0, 20, 30, 0.4);
+    border: 1px solid rgba(0, 240, 255, 0.4);
+    backdrop-filter: blur(2px);
+  }
+  .hud-top-right .hud-minimap-vert canvas {
     display: block;
     image-rendering: pixelated;
     background: rgba(0, 0, 0, 0.4);
   }
+  .hud-top-right .hud-top-right-stack {
+    padding: 12px 16px;
+    background: rgba(0, 20, 30, 0.4);
+    border: 1px solid rgba(0, 240, 255, 0.4);
+    backdrop-filter: blur(2px);
+    text-align: right;
+    min-width: 160px;
+  }
+  .hud-bottom-left { bottom: 0; left: 0; min-width: 220px; }
+  .hud-bottom-right { bottom: 0; right: 0; text-align: right; }
   .hud-boss {
-    top: 100px;
+    top: 220px;
     left: 0;
     min-width: 240px;
     border-color: var(--orange);
