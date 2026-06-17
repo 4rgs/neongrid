@@ -966,16 +966,34 @@ export class Game {
     this.scene.add(this.boss.group);
     this.hud.setBossHp(this.boss.hp, this.boss.maxHp);
     this.audio.warning();
-    // Cinematic: pull camera back to reveal the boss.
-    // The cinematic lasts 5s (longer than before) so the player
-    // has time to register the reveal before the fight starts.
+    // Cinematic spiral + reveal. Two phases:
+    //   Phase A (t=0..3.5): camera orbits the HERO in a tight spiral,
+    //     spinning 360° while the pitch drops from high overhead
+    //     down to shoulder level, and distance pulls in. This is the
+    //     "wind-up" — the player sees the world rotate around them
+    //     as the boss is about to engage.
+    //   Phase B (t=3.5..6.5): camera cuts to the BOSS and dollies
+    //     forward, pulling in for the reveal close-up, then settles
+    //     at gameplay distance behind the hero.
     const hp = this.hero.group.position.clone();
+    const baseYaw = this.camCtl.yaw;
+    const bossFocus = new THREE.Vector3(0, 1.5, -90);
+    const TAU = Math.PI * 2;
     this.cine.play([
-      { focus: hp,                  yaw: this.camCtl.yaw, pitch: 0.35, distance: 24, t: 0    },
-      { focus: hp,                  yaw: this.camCtl.yaw, pitch: 0.55, distance: 28, t: 1.2  },
-      { focus: new THREE.Vector3(0, 0, -85), yaw: Math.PI,      pitch: 0.50, distance: 26, t: 2.6  },
-      { focus: new THREE.Vector3(0, 0, -85), yaw: Math.PI,      pitch: 0.45, distance: 22, t: 3.8  },
-      { focus: this.hero.group.position.clone(), yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 5.0  },
+      // Phase A — spiral around the hero (wind-up)
+      { focus: hp, yaw: baseYaw + 0 * TAU, pitch: 0.85, distance: 30, t: 0.0  },
+      { focus: hp, yaw: baseYaw + TAU / 6, pitch: 0.72, distance: 24, t: 0.6  },
+      { focus: hp, yaw: baseYaw + TAU / 3, pitch: 0.60, distance: 19, t: 1.2  },
+      { focus: hp, yaw: baseYaw + TAU / 2, pitch: 0.50, distance: 16, t: 1.8  },
+      { focus: hp, yaw: baseYaw + 2*TAU / 3, pitch: 0.45, distance: 14, t: 2.4  },
+      { focus: hp, yaw: baseYaw + 5*TAU / 6, pitch: 0.40, distance: 13, t: 3.0  },
+      { focus: hp, yaw: baseYaw + TAU,       pitch: 0.45, distance: 14, t: 3.5  },
+      // Phase B — reveal the boss
+      { focus: bossFocus,                       yaw: Math.PI,       pitch: 0.50, distance: 32, t: 4.0  },
+      { focus: bossFocus,                       yaw: Math.PI,       pitch: 0.45, distance: 26, t: 4.8  },
+      { focus: bossFocus,                       yaw: Math.PI,       pitch: 0.40, distance: 22, t: 5.6  },
+      // Final — settle back behind the hero for the fight
+      { focus: hp,                            yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 6.5  },
     ]);
   }
 
