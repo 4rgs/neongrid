@@ -68,6 +68,27 @@ export class ParticleSystem {
     this.geo.setDrawRange(0, this.count);
   }
 
+  /**
+   * Hard reset: clear every slot, drop the draw range, and reset the
+   * cursor so the next burst starts at index 0. Called by Game at
+   * level transitions / death / restart so the player doesn't see
+   * stale particles from previous encounters lingering on screen.
+   */
+  clear() {
+    for (let i = 0; i < POOL_SIZE; i++) {
+      this.life[i] = 0;
+      this.maxLife[i] = 0;
+      this.vel[i * 3] = 0;
+      this.vel[i * 3 + 1] = 0;
+      this.vel[i * 3 + 2] = 0;
+    }
+    this.cursor = 0;
+    this.count = 0;
+    this.geo.setDrawRange(0, 0);
+    this.geo.getAttribute('position')!.needsUpdate = true;
+    this.geo.getAttribute('color')!.needsUpdate = true;
+  }
+
   update(dt: number) {
     let alive = 0;
     for (let i = 0; i < this.count; i++) {

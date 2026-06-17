@@ -31,15 +31,19 @@ export class Enemy {
   // projectile list (for turret/hunter)
   projectiles: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number }[] = [];
 
-  constructor(kind: EnemyKind, a: THREE.Vector3, b: THREE.Vector3) {
+  constructor(kind: EnemyKind, a: THREE.Vector3, b: THREE.Vector3, levelMul = 1) {
     this.kind = kind;
     this.patrolA = a.clone();
     this.patrolB = b.clone();
     this.group.position.set(a.x, terrainHeight(a.x, a.z), a.z);
     this.buildMesh();
-    if (kind === 'hunter') this.hp = this.maxHp = 3;
-    if (kind === 'charger') this.hp = this.maxHp = 4;
-    if (kind === 'drone') this.hp = this.maxHp = 2;
+    // Base HP per kind, scaled by the level difficulty multiplier so
+    // each new level spawns tougher enemies. Ceil so a 1.0 mul still
+    // gives the base HP and 1.5x on 2hp gives 3hp (not 3.something).
+    const base = (kind === 'hunter' || kind === 'charger') ? 4
+               : kind === 'drone' ? 2
+               : 2;  // patrol / turret
+    this.hp = this.maxHp = Math.max(1, Math.ceil(base * levelMul));
   }
 
   private buildMesh() {

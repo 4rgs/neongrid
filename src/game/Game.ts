@@ -200,42 +200,119 @@ export class Game {
   /** Multiplier applied to enemy hp / damage as level rises. */
   get difficultyMul(): number { return 1 + (this.level - 1) * 0.5; }
 
+  /**
+   * Wipe every dynamic entity from the world: enemies, the boss
+   * (and its projectiles), fragments, gates, the particle pool,
+   * and the per-level trackers (difficulty waves, kill/damage
+   * counters, fragments collected). Called from every reset path
+   * — death, level change, respawn, full restart — so the next
+   * level starts with a clean slate instead of inheriting
+   * half-dead enemies, lingering boss shots, and stale particles
+   * from the previous encounter.
+   *
+   * NOTE: this does NOT touch components (chips / caps / megas) or
+   * the hero. Those have their own reset paths because they need
+   * to be regenerated from a new RNG seed rather than just hidden.
+   */
+  private clearField() {
+    // ── Enemies (alive + dead) ──
+    for (const e of this.enemies) {
+      for (const p of e.projectiles) p.mesh.parent?.remove(p.mesh);
+      e.projectiles.length = 0;
+      this.scene.remove(e.group);
+    }
+    this.enemies.length = 0;
+    // ── Boss ──
+    if (this.boss) {
+      for (const p of this.boss.projectiles) p.mesh.parent?.remove(p.mesh);
+      this.boss.projectiles.length = 0;
+      this.scene.remove(this.boss.group);
+    }
+    this.boss = null;
+    this.bossSpawned = false;
+    this.bossDefeated = false;
+    // ── Fragments ──
+    for (const f of this.fragments) this.scene.remove(f.group);
+    this.fragments.length = 0;
+    this.fragmentsCollected = 0;
+    this.fragmentsTotal = 0;
+    // ── Gates (sector markers) — they reset to default state too ──
+    for (const g of this.gates) this.scene.remove(g.group);
+    this.gates.length = 0;
+    // ── Per-level trackers ──
+    this.difficultyWave1 = 0;
+    this.difficultyWave2 = 0;
+    this.damageThisLevel = 0;
+    this.enemiesKilledThisLevel = 0;
+    // ── Boss contact cd (avoid leftover i-frames) ──
+    this.bossContactCd = 0;
+    // ── Particle pool ──
+    this.particles.clear();
+  }
+
+  /**
+   * Spawn the base level layout: 8 base enemies (patrol ×2, turret ×2,
+   * hunter ×2, charger ×2) + 2 gates + 9 fragments spread across the
+   * sectors. Called from the initial mount AND after every
+   * clearField() so the new run/level/respawn always has the same
+   * opening composition. The actual per-enemy HP is scaled by
+   * this.difficultyMul inside makeEnemy, so each new level spawns
+   * tougher opponents without changing the layout itself.
+   */
+  private spawnLevelEntities() {
+    for (const s of SECTORS) {
+      const frags = makeFragmentsForSector(s);
+      for (const f of frags) {
+        this.fragments.push(f);
+        this.scene.add(f.group);
+      }
+    }
+    this.fragmentsTotal = this.fragments.length;
+    this.hud.setFragments(this.fragmentsCollected, this.fragmentsTotal);
+
+    this.gates.push(this.makeGate(new THREE.Vector3(30, 0, 0), PALETTE.red,   'PURGED SECTOR // REQ 1 FRAG'));
+    this.gates.push(this.makeGate(new THREE.Vector3(-30, 0, 0), PALETTE.green, 'GHOST CACHE // REQ 1 FRAG'));
+
+    this.enemies.push(this.makeEnemy('patrol',  new THREE.Vector3( 45, 0,   8), new THREE.Vector3( 70, 0,  14)));
+    this.enemies.push(this.makeEnemy('patrol',  new THREE.Vector3(-50, 0, -12), new THREE.Vector3(-75, 0,  12)));
+    this.enemies.push(this.makeEnemy('turret',  new THREE.Vector3( 80, 0,  -6), new THREE.Vector3( 80, 0,  -6)));
+    this.enemies.push(this.makeEnemy('turret',  new THREE.Vector3(-90, 0,   6), new THREE.Vector3(-90, 0,   6)));
+    this.enemies.push(this.makeEnemy('hunter',  new THREE.Vector3( 20, 0,  25), new THREE.Vector3( 40, 0,  25)));
+    this.enemies.push(this.makeEnemy('hunter',  new THREE.Vector3(-25, 0, -25), new THREE.Vector3(-45, 0, -25)));
+    this.enemies.push(this.makeEnemy('charger', new THREE.Vector3( 50, 0, -30), new THREE.Vector3( 60, 0, -20)));
+    this.enemies.push(this.makeEnemy('charger', new THREE.Vector3(-30, 0,  30), new THREE.Vector3(-45, 0,  40)));
+  }
+
   /** Start a new level: clear field, bump level, regenerate
    *  components, more enemies, harder boss. After a cinematic reveal,
    *  opens the shop so the player can spend score on upgrades. */
   private startNextLevel() {
     this.level++;
+    this.clearField();
     this.hud.setTransition(false);
     this.hud.setLevel(this.level);
     this.hud.setBossHp(0, 0);
 
-    // Heal hero to full and clear boss state
+    // Heal hero to full
     this.hero.hp = this.hero.maxHp;
     this.hud.setHp(this.hero.hp, this.hero.maxHp);
-    this.boss = null;
-    this.bossSpawned = false;
-    this.bossDefeated = false;
 
-    // Clear the old boss projectiles (they'd linger otherwise)
-    for (const e of this.enemies) {
-      for (const p of e.projectiles) p.mesh.parent?.remove(p.mesh);
-    }
+    // Respawn the level layout: 8 base enemies (scaled by
+    // this.difficultyMul so each new level is tougher), 2 gates,
+    // 9 fragments. Then spawn level-1 extra enemies (already
+    // happens via the per-level progression) on top of that.
+    this.spawnLevelEntities();
 
-    // Remove old components from the scene
+    // Re-generate components from a fresh per-level RNG seed so
+    // the world layout changes between levels. clearField didn't
+    // touch components (they were already replaced in the prior
+    // level), so we wipe them explicitly here.
     for (const c of this.components) this.scene.remove(c.group);
     seedRandom(this.level * 9173 + 42);
     this.components = generateComponents();
     for (const c of this.components) this.scene.add(c.group);
 
-    // Re-populate fragments
-    for (const f of this.fragments) {
-      f.collected = false;
-      f.group.visible = true;
-    }
-    this.fragmentsCollected = 0;
-    this.hud.setFragments(0, this.fragmentsTotal);
-
-    // Add MORE enemies per level
+    // Add MORE enemies per level on top of the base set
     this.spawnExtraEnemies();
 
     // Reset the hero to the hub
@@ -368,6 +445,11 @@ export class Game {
   private startGameOver() {
     if (this.gameOver) return;
     this.gameOver = true;
+    // Clear the field on death so the world the player sees in the
+    // smash-zoom freeze-frame is pristine — no lingering enemies
+    // walking around the body, no leftover particles from the hit
+    // that killed them. Hero + boss contact are wiped in clearField.
+    this.clearField();
     this.hud.setShop(false);
     this.audio.ambientStop();
     this.audio.hurt();
@@ -474,6 +556,12 @@ export class Game {
    * across runs and are shown in the HUD / leaderboard).
    */
   restartRun() {
+    // Hard reset for a brand-new run: wipe the field, the boss, all
+    // enemies and projectiles, fragments, gates, and the particle
+    // pool, then rebuild the world with the L1 layout and the
+    // default upgrades. Best score + achievements survive in
+    // localStorage (see save.run.upgrades reset below).
+    this.clearField();
     // Clear the game-over UI
     this.gameOver = false;
     this.hud.setGameOver(false);
@@ -510,7 +598,9 @@ export class Game {
     this.bossSpawned = false;
     this.bossDefeated = false;
     this.boss = null;
-    for (const f of this.fragments) { f.collected = false; f.group.visible = true; }
+    // Spawn fresh level entities (8 base enemies scaled by
+    // this.difficultyMul = 1 at L1, 2 gates, 9 fragments).
+    this.spawnLevelEntities();
     for (const c of this.components) this.scene.remove(c.group);
     seedRandom(this.level * 9173 + 42);
     this.components = generateComponents();
@@ -532,6 +622,12 @@ export class Game {
 
   /** Respawn at the same level the player died on. */
   respawn() {
+    // Wipe the field first so the dead enemies, the boss and its
+    // projectiles, the fragments they were standing on, and the
+    // particles from the killing blow don't carry over. The new
+    // level layout is generated from the same RNG seed, so the
+    // player gets back into a familiar (but clean) world.
+    this.clearField();
     // Reset run timer / per-level trackers
     this.gameOver = false;
     this.hud.setGameOver(false);
@@ -543,14 +639,15 @@ export class Game {
     this.hero.attackCdMul = this.save.run.upgrades.attackSpeedMul;
     this.hero.speedMul = this.save.run.upgrades.speedMul;
     this.hud.setHp(this.hero.hp, this.hero.maxHp);
-    // Reset world for the current level (re-generate components + boss)
+    // Reset world for the current level (re-generate entities,
+    // components, boss)
     this.damageThisLevel = 0;
     this.enemiesKilledThisLevel = 0;
     this.levelStartTime = performance.now();
     this.fragmentsCollected = 0;
-    this.hud.setFragments(0, this.fragmentsTotal);
-    for (const f of this.fragments) { f.collected = false; f.group.visible = true; }
-    // Reset enemies
+    // Spawn the level layout: 8 base enemies, 2 gates, 9 fragments.
+    this.spawnLevelEntities();
+    // Re-generate components from the same per-level RNG seed.
     for (const c of this.components) this.scene.remove(c.group);
     seedRandom(this.level * 9173 + 42);
     this.components = generateComponents();
@@ -625,27 +722,13 @@ export class Game {
     this.particles = new ParticleSystem(this.scene);
     this.trail = new TrailRenderer(this.scene);
 
-    for (const s of SECTORS) {
-      const frags = makeFragmentsForSector(s);
-      for (const f of frags) {
-        this.fragments.push(f);
-        this.scene.add(f.group);
-      }
-    }
-    this.fragmentsTotal = this.fragments.length;
-
-    this.gates.push(this.makeGate(new THREE.Vector3(30, 0, 0), PALETTE.red, 'PURGED SECTOR // REQ 1 FRAG'));
-    this.gates.push(this.makeGate(new THREE.Vector3(-30, 0, 0), PALETTE.green, 'GHOST CACHE // REQ 1 FRAG'));
-
-    this.enemies.push(this.makeEnemy('patrol', new THREE.Vector3(45, 0, 8), new THREE.Vector3(70, 0, 14)));
-    this.enemies.push(this.makeEnemy('patrol', new THREE.Vector3(-50, 0, -12), new THREE.Vector3(-75, 0, 12)));
-    this.enemies.push(this.makeEnemy('turret', new THREE.Vector3(80, 0, -6), new THREE.Vector3(80, 0, -6)));
-    this.enemies.push(this.makeEnemy('turret', new THREE.Vector3(-90, 0, 6), new THREE.Vector3(-90, 0, 6)));
-    // New enemy types
-    this.enemies.push(this.makeEnemy('hunter', new THREE.Vector3(20, 0, 25), new THREE.Vector3(40, 0, 25)));
-    this.enemies.push(this.makeEnemy('hunter', new THREE.Vector3(-25, 0, -25), new THREE.Vector3(-45, 0, -25)));
-    this.enemies.push(this.makeEnemy('charger', new THREE.Vector3(50, 0, -30), new THREE.Vector3(60, 0, -20)));
-    this.enemies.push(this.makeEnemy('charger', new THREE.Vector3(-30, 0, 30), new THREE.Vector3(-45, 0, 40)));
+    // Spawn the base layout for the current level. Called both on
+    // the initial mount and after every clearField() (level change,
+    // respawn, restart) so the new run always has the same opening
+    // composition. difficultyMul is applied per-enemy so each
+    // new level spawns tougher opponents without us having to
+    // change the layout here.
+    this.spawnLevelEntities();
 
     // Difficulty wave 1 (4 more drones at 30%+ progress)
     this.difficultyWave1 = 0; // set when player reaches 30% fragments
@@ -673,7 +756,9 @@ export class Game {
   }
 
   private makeEnemy(kind: 'patrol' | 'turret' | 'hunter' | 'charger' | 'drone', a: THREE.Vector3, b: THREE.Vector3): Enemy {
-    const e = new Enemy(kind, a, b);
+    // Spawn the enemy with this level's difficulty multiplier so the
+    // HP scales per level (1.0 at L1, 1.5 at L2, 2.0 at L3, ...).
+    const e = new Enemy(kind, a, b, this.difficultyMul);
     this.scene.add(e.group);
     return e;
   }
