@@ -60,6 +60,12 @@ export class Hero {
   hpChanged = false;
   onGround = true;
   vy = 0;
+  // Double jump + coyote time. Standard platformer courtesy so the
+  // player can chain jumps (cap on top of chip, cap on top of cap)
+  // and has a brief window to jump after walking off a ledge.
+  jumpsLeft = 2;
+  maxJumps = 2;
+  coyoteT = 0;
   dashT = 0;
   dashDir = new THREE.Vector3();
   dashCd = 0;
@@ -253,19 +259,41 @@ export class Hero {
     this.velocity.x = vel.x * speed;
     this.velocity.z = vel.z * speed;
 
-    // Jump physics. Tuned so the hero can reach the top of medium
-    // components (chips, caps, resistors, diodes, mega-IC ~2m tall)
-    // and "step" up the smaller electrolytic towers (3-5m) by chaining
-    // jumps. The really tall towers (9-14m, used as boss arenas)
-    // remain unreachable on purpose — they're meant as scenery +
-    // cover, not as climbable platforms.
-    // max height = vy^2 / (2*g) = 11^2 / (2*22) = 2.75m
-    if (wantJump && this.onGround) {
-      this.vy = 11;
-      this.onGround = false;
+    // Jump physics. Tuned so the hero can chain up the medium
+    // components (chips → caps → megas) but the tall towers (9-14m,
+    // used as boss arenas) remain unreachable on purpose — they're
+    // meant as scenery + cover, not as climbable platforms.
+    //   single jump: vy=12.5, g=22 → max height 12.5² / 44 ≈ 3.55m
+    //                covers chips (0.4m), diodes (1.2m), megas (2.5m),
+    //                and most caps (2-3m) in one bound
+    //   double jump: same vy at apex of first jump → can chain onto
+    //                a cap from another cap (cumulative ~7m reachable)
+    //   coyote: 100ms grace after walking off a ledge so the player
+    //           doesn't feel cheated by frame-perfect timing
+    if (this.onGround) this.coyoteT = 0.1;
+    else if (this.coyoteT > 0) this.coyoteT -= dt;
+    if (wantJump) {
+      const onLedge = this.onGround || this.coyoteT > 0;
+      if (onLedge || this.jumpsLeft > 0) {
+        if (onLedge) this.jumpsLeft = this.maxJumps - 1;   // ground jump spends one, leaves 1 for air
+        else        this.jumpsLeft -= 1;                    // air jump
+        this.vy = 12.5;
+        this.onGround = false;
+        this.coyoteT = 0;
+      }
     }
     this.vy -= 22 * dt;
-    // AABB sliding collision
+    // AABB sliding collision. The slide MUST respect top-landing:
+    // if the hero is standing on, jumping off, or falling onto a
+    // component from above (position.y is at or above the top, within
+    // a 0.3m landing tolerance), the slide would otherwise shove the
+    // hero off the side of the cap / chip on the very first frame of
+    // motion — both at jump start (vy > 0) and at landing (vy < 0).
+    // The fix: when the component we'd slide against is also the one
+    // the hero is sitting on (or about to land on), skip the slide.
+    // The check uses `>= top - 0.3` for both rising and falling —
+    // only when the hero is BELOW the cap's top with downward
+    // velocity do we apply the wall slide.
     const heroRadius = 0.45;
     const newX = this.group.position.x + this.velocity.x * dt;
     const newZ = this.group.position.z + this.velocity.z * dt;
@@ -274,17 +302,33 @@ export class Hero {
     {
       const c = this.firstCollider(components, finalX, this.group.position.z, heroRadius);
       if (c) {
-        const sign = Math.sign(this.velocity.x) || 1;
-        finalX = c.group.position.x - sign * (c.halfX + heroRadius + 0.001);
-        this.velocity.x = 0;
+        const top = c.group.position.y + c.height;
+        // "On top of" the component = hero's current y is at or above
+        // the top, or the hero is descending INTO the top (vy < 0 and
+        // y close to top). In all these cases the slide would eject
+        // the hero off the side instead of letting them stand / land
+        // on it. Only wall-slide when the hero is clearly below the
+        // top, i.e. walking into the side of a cap from the ground.
+        const onTop = this.group.position.y >= top - 0.05;
+        const landingOnTop = this.vy < 0 && this.group.position.y >= top - 0.3;
+        if (!onTop && !landingOnTop) {
+          const sign = Math.sign(this.velocity.x) || 1;
+          finalX = c.group.position.x - sign * (c.halfX + heroRadius + 0.001);
+          this.velocity.x = 0;
+        }
       }
     }
     {
       const c = this.firstCollider(components, finalX, finalZ, heroRadius);
       if (c) {
-        const sign = Math.sign(this.velocity.z) || 1;
-        finalZ = c.group.position.z - sign * (c.halfZ + heroRadius + 0.001);
-        this.velocity.z = 0;
+        const top = c.group.position.y + c.height;
+        const onTop = this.group.position.y >= top - 0.05;
+        const landingOnTop = this.vy < 0 && this.group.position.y >= top - 0.3;
+        if (!onTop && !landingOnTop) {
+          const sign = Math.sign(this.velocity.z) || 1;
+          finalZ = c.group.position.z - sign * (c.halfZ + heroRadius + 0.001);
+          this.velocity.z = 0;
+        }
       }
     }
     this.group.position.x = finalX;
@@ -298,7 +342,10 @@ export class Hero {
     const topCheck = this.topCollider(components, this.group.position.x, this.group.position.z, 0.45);
     if (topCheck) {
       const top = topCheck.group.position.y + topCheck.height;
-      if (this.group.position.y >= top - 0.5 && this.vy <= 0) {
+      // 0.3m landing tolerance — narrow enough to feel precise
+      // (you have to actually land on top, not graze the side),
+      // generous enough to forgive the apex of a long arc.
+      if (this.group.position.y >= top - 0.3 && this.vy <= 0) {
         standOnY = top + 0.02;
         standOnComponent = topCheck;
       }
@@ -307,6 +354,9 @@ export class Hero {
       this.group.position.y = standOnY;
       this.vy = 0;
       this.onGround = true;
+      // Refresh the air-jump budget on every landing (ground or top
+      // of a component), so climbing caps with chaining works.
+      this.jumpsLeft = this.maxJumps;
     }
 
     // Pitch & roll the hero to follow the slope.

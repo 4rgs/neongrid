@@ -147,6 +147,15 @@ export class Game {
   // Boss spawn condition
   private bossSpawned = false;
   private bossDefeated = false;
+  // Where the hero died — captured by startGameOver so the smash-zoom
+  // cinematic can focus the body even if the hero gets reset later.
+  private deathPos: THREE.Vector3 = new THREE.Vector3();
+  // Body-contact damage from the boss is throttled by this cooldown so
+  // touching it deals 1 hp per 0.7s instead of draining the hero every
+  // frame (or instakilling, which punished the player too harshly).
+  // The boss still pressures the player via projectiles and the enrage
+  // phase (< 30% HP) ramping its fire-rate and drift speed.
+  private bossContactCd = 0;
   // Difficulty progression
   private difficultyWave1 = 0;
   private difficultyWave2 = 0;
@@ -371,13 +380,29 @@ export class Game {
     this.save.run.currentLevel = this.level;
     saveRun(this.save.run);
 
-    // Show the name-entry modal with the last-used name as default.
-    // The user can confirm (Enter) or skip; either path lands on
-    // submitWithName() which validates and POSTs to the leaderboard.
-    // Delay the modal slightly so the player has time to register the
-    // death (red flash + shake + ambient drop) before being asked
-    // for their handle.
-    setTimeout(() => this.hud.askForName(this.save.run.heroName), 700);
+    // Capture where the hero died so the smash-zoom can frame the body.
+    // Clone because the hero may keep moving briefly before the world
+    // freezes on the next tick (the cinematic lock takes effect at the
+    // top of tick()).
+    this.deathPos.copy(this.hero.group.position);
+
+    // Smash-zoom cinematic: camera SLAMS into the dead body (~0.5s) with
+    // a small orbit, then 700ms later the "identify yourself" modal
+    // appears. The world is frozen during the cine so the body stays
+    // framed; the red flash + shake from above paint over the 3D scene
+    // as HUD overlays, which is exactly the "everything just stopped"
+    // feel we want. After the cine ends the askForName modal takes over.
+    {
+      const dp = this.deathPos.clone();
+      const startYaw = this.camCtl.yaw;
+      this.cine.play([
+        { focus: new THREE.Vector3(dp.x, dp.y + 0.5, dp.z), yaw: startYaw,       pitch: 0.45, distance: 18, t: 0.0  },
+        { focus: new THREE.Vector3(dp.x, dp.y + 0.5, dp.z), yaw: startYaw + 0.6, pitch: 0.30, distance: 5,  t: 0.5  },
+      ], () => {
+        // 700ms after the smash lands, pop the name-entry modal.
+        setTimeout(() => this.hud.askForName(this.save.run.heroName), 700);
+      });
+    }
   }
 
   /** Called by the HUD once the player has entered a name (or skipped).
@@ -699,6 +724,14 @@ export class Game {
     }
 
     if (!this.paused && !this.gameOver) this.tick(dt, this.t);
+    // Cinematic must keep advancing even when gameOver is true so that
+    // the death cinematic (smash-zoom) can finish and fire its onDone
+    // callback — that's what pops the "identify yourself" modal. Without
+    // this, gameOver freezes the tick and the smash-zoom hangs forever.
+    if (this.gameOver && this.cine.running) {
+      this.input.consumeOrbit();
+      this.cine.update(dt, this.t);
+    }
     // Music always advances (even on game over) for atmosphere
     this.audio.musicTick(dt);
     // Music intensity rises during boss fight
@@ -767,6 +800,18 @@ export class Game {
       this.audio.ambientStop();
       this.saveBestScore(this.score);
       this.hud.setTransition(true, `LEVEL ${this.level} CLEARED`);
+      // Outro cinematic: slow-zoom out from the dead boss. Starts at
+      // ~the current camera distance and pulls back, pitching up a bit
+      // to give a "you did it" wide reveal of the wreckage. The world
+      // freezes during the cine (tick() short-circuits), so the boss
+      // body stays in frame for the whole 3s.
+      {
+        const bossFocus = this.boss.group.position.clone().setY(1.5);
+        this.cine.play([
+          { focus: bossFocus, yaw: this.camCtl.yaw,           pitch: 0.45, distance: 14, t: 0.0 },
+          { focus: bossFocus, yaw: this.camCtl.yaw + Math.PI / 6, pitch: 0.65, distance: 45, t: 3.0 },
+        ]);
+      }
       setTimeout(() => this.startNextLevel(), 2800);
       return;
     }
@@ -916,19 +961,50 @@ export class Game {
         this.particles.burst(this.boss.group.position.clone().setY(2), 0xffffff, 30, 5, 0.4);
         // Level transition is detected at the top of tick() (next frame)
       }
-      // Boss contact — INSTAKILL. Touching the master process ends the
-      // run immediately (the user wanted a more aggressive threat).
-      // Suppressed while the shop is open so the player can shop
-      // without being one-shot by a wandering boss.
+      // Boss body contact — INSTAKILL. Touching the master process ends
+      // the run immediately. Suppressed only while the shop is open so
+      // the player can shop without being one-shot by a wandering boss.
+      if (this.bossContactCd > 0) this.bossContactCd -= dt;
       if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 4.5 && !this.shopDamagePaused) {
         this.damageThisLevel++;
         const dead = this.hero.hurt(999);   // instakill
+        this.bossContactCd = 0.7;            // brief i-frames to avoid double-trigger next frame
         this.hud.setHp(this.hero.hp, this.hero.maxHp);
         this.audio.hurt();
         this.shake(0.6, 0.7);
         // Massive particles for the boss-touched-the-hero moment
         this.particles.burst(this.hero.group.position.clone().setY(1), PALETTE.red, 200, 12, 1.4);
         if (dead) this.startGameOver();
+      }
+      // Boss projectiles — the boss has its own projectile pool
+      // (this.boss.projectiles) that is updated inside boss.update().
+      // The enemies loop above only iterates enemy projectiles, so the
+      // boss's shots used to fly straight through the hero with no
+      // collision check. Mirror the enemies loop here.
+      //
+      // Hitbox is a CYLINDER around the hero (XZ-plane distance
+      // only), not a sphere. Reason: the boss fires from height
+      // 2.5m and the hero's pivot is at Y=0, so a 3D sphere check
+      // would require the projectile to be at almost the same Y
+      // as the hero to register a hit. The cylinder treats the
+      // hero as a vertical column (Y=0..2) and checks the XZ
+      // distance, which is what the player actually perceives as
+      // "the shot went through me". Enemies use the same shape.
+      for (const p of this.boss.projectiles) {
+        const dx = p.mesh.position.x - this.hero.group.position.x;
+        const dz = p.mesh.position.z - this.hero.group.position.z;
+        const distXZ = Math.hypot(dx, dz);
+        if (distXZ < 2.0) {
+          if (this.shopDamagePaused) { p.life = 0; continue; }
+          this.damageThisLevel++;
+          p.life = 0;
+          this.particles.burst(p.mesh.position.clone(), PALETTE.cyan, 18, 4, 0.5);
+          const dead = this.hero.hurt(p.damage);
+          this.hud.setHp(this.hero.hp, this.hero.maxHp);
+          this.audio.hurt();
+          this.shake(0.25, 0.3);
+          if (dead) this.startGameOver();
+        }
       }
     }
 
@@ -942,8 +1018,13 @@ export class Game {
 
   /** Triggered when the player collects the last fragment. Plays
    *  the "finalization" sequence: white flash, screen shake, lore
-   *  banner, warning audio, particle burst, then 1.6s later the
-   *  boss spawns with an extended cinematic reveal. */
+   *  banner, warning audio, particle burst, AND a short camera
+   *  transition that pulls back and tilts the view toward the boss
+   *  spawn position so the player feels the "something is coming"
+   *  moment, not a static beat. After 1.6s the boss spawns and its
+   *  spiral-reveal cinematic continues seamlessly from where this
+   *  transition left off (its first keyframe matches the last
+   *  keyframe of this transition). */
   private finalizeFragmentRun() {
     if (this.bossSpawned) return;
     this.bossSpawned = true;   // claim immediately so we don't double-spawn
@@ -956,7 +1037,25 @@ export class Game {
     this.particles.burst(this.hero.group.position.clone().setY(1.5), PALETTE.cyan, 120, 8, 1.2);
     // Audio: warning + chord
     this.audio.warning();
-    // Spawn the boss 1.6s later so the player has time to see the flash
+
+    // Camera transition: from the gameplay view (looking at the hero)
+    // to a wide shot of the boss spawn position (0, 1.5, -90). The
+    // camera dollies back, the yaw swings to face the boss spawn, and
+    // the pitch drops slightly so the boss point reads as "ahead of
+    // you, far away, dangerous". spawnBoss will then continue this
+    // pull-in, so the two cinematics are one continuous move.
+    {
+      const bossFocus = new THREE.Vector3(0, 1.5, -90);
+      this.cine.play([
+        // Hold the gameplay view for a beat so the white flash reads
+        { focus: this.hero.group.position.clone(), yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 0.0 },
+        // Pull back, swing to the boss, drop the pitch
+        { focus: bossFocus,                         yaw: Math.PI,        pitch: 0.35, distance: 28, t: 1.6 },
+      ]);
+    }
+
+    // Spawn the boss when the transition ends so its spiral-reveal
+    // starts from the wide-boss-shot the transition left us in.
     setTimeout(() => this.spawnBoss(), 1600);
   }
 
@@ -966,34 +1065,26 @@ export class Game {
     this.scene.add(this.boss.group);
     this.hud.setBossHp(this.boss.hp, this.boss.maxHp);
     this.audio.warning();
-    // Cinematic spiral + reveal. Two phases:
-    //   Phase A (t=0..3.5): camera orbits the HERO in a tight spiral,
-    //     spinning 360° while the pitch drops from high overhead
-    //     down to shoulder level, and distance pulls in. This is the
-    //     "wind-up" — the player sees the world rotate around them
-    //     as the boss is about to engage.
-    //   Phase B (t=3.5..6.5): camera cuts to the BOSS and dollies
-    //     forward, pulling in for the reveal close-up, then settles
-    //     at gameplay distance behind the hero.
+    // Cinematic reveal that continues from finalizeFragmentRun's
+    // transition (which left the camera in a wide shot of the boss
+    // spawn position). The first keyframe matches the end of that
+    // transition — same focus, same distance, same pitch — so the
+    // move is continuous: pull-in toward the boss, slight orbit to
+    // register the threat, then settle back behind the hero for the
+    // fight.
     const hp = this.hero.group.position.clone();
-    const baseYaw = this.camCtl.yaw;
     const bossFocus = new THREE.Vector3(0, 1.5, -90);
-    const TAU = Math.PI * 2;
     this.cine.play([
-      // Phase A — spiral around the hero (wind-up)
-      { focus: hp, yaw: baseYaw + 0 * TAU, pitch: 0.85, distance: 30, t: 0.0  },
-      { focus: hp, yaw: baseYaw + TAU / 6, pitch: 0.72, distance: 24, t: 0.6  },
-      { focus: hp, yaw: baseYaw + TAU / 3, pitch: 0.60, distance: 19, t: 1.2  },
-      { focus: hp, yaw: baseYaw + TAU / 2, pitch: 0.50, distance: 16, t: 1.8  },
-      { focus: hp, yaw: baseYaw + 2*TAU / 3, pitch: 0.45, distance: 14, t: 2.4  },
-      { focus: hp, yaw: baseYaw + 5*TAU / 6, pitch: 0.40, distance: 13, t: 3.0  },
-      { focus: hp, yaw: baseYaw + TAU,       pitch: 0.45, distance: 14, t: 3.5  },
-      // Phase B — reveal the boss
-      { focus: bossFocus,                       yaw: Math.PI,       pitch: 0.50, distance: 32, t: 4.0  },
-      { focus: bossFocus,                       yaw: Math.PI,       pitch: 0.45, distance: 26, t: 4.8  },
-      { focus: bossFocus,                       yaw: Math.PI,       pitch: 0.40, distance: 22, t: 5.6  },
-      // Final — settle back behind the hero for the fight
-      { focus: hp,                            yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 6.5  },
+      // Match end-of-transition (wide boss shot) — no discontinuity
+      { focus: bossFocus,                       yaw: Math.PI,        pitch: 0.35, distance: 28, t: 0.0 },
+      // Pull in toward the boss
+      { focus: bossFocus,                       yaw: Math.PI,        pitch: 0.40, distance: 22, t: 0.8 },
+      // Slight orbit, pitch up — register the threat
+      { focus: bossFocus,                       yaw: Math.PI + 0.4,  pitch: 0.45, distance: 18, t: 1.8 },
+      // Begin the swing back toward the hero
+      { focus: bossFocus.clone().lerp(hp, 0.5), yaw: Math.PI + 0.6,  pitch: 0.50, distance: 16, t: 2.8 },
+      // Settle behind the hero for gameplay
+      { focus: hp,                              yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 4.0 },
     ]);
   }
 

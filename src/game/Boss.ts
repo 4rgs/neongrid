@@ -240,14 +240,27 @@ export class Boss {
   private fire(t: number) {
     const speed = this.projectileSpeed();
     const damage = this.damage();
-    const toPlayer = new THREE.Vector3().subVectors(this.playerPos, this.group.position).setY(1.5).normalize();
+    // Aim at the hero's actual world position. The previous code
+    // forced the direction's Y to 1.5 (a hack to keep shots at
+    // "torso height"), but that ALSO overwrote the vertical aim —
+    // making projectiles fly at a 1.5m-relative-Y target instead of
+    // toward the hero's real Y. Result: shots that were aimed at a
+    // hero near ground level flew several meters above their head
+    // and never came within the 2m hitbox. Now we aim at the hero
+    // and let the projectile travel in a true 3D line — the fire
+    // origin is already lifted to 2.5m (see `start` below) so the
+    // projectile spawns at boss-torso height, and the direction
+    // actually points at the hero including any height difference.
+    const toPlayer = new THREE.Vector3().subVectors(this.playerPos, this.group.position).normalize();
     const start = this.group.position.clone().add(new THREE.Vector3(0, 2.5, 0));
     const fanCount = Math.min(1 + this.level, 5);
     const fanSpread = 0.45;
     for (let i = 0; i < fanCount; i++) {
       const offset = fanCount === 1 ? 0 : (i - (fanCount - 1) / 2) * fanSpread;
+      // Fan-out the XZ angle but keep the Y component of toPlayer so
+      // the projectiles still climb / drop toward the hero.
       const a = Math.atan2(toPlayer.x, toPlayer.z) + offset;
-      const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)).normalize();
+      const dir = new THREE.Vector3(Math.sin(a), toPlayer.y, Math.cos(a)).normalize();
       this.spawnProjectile(start, dir, speed, damage);
     }
     if (this.enraged()) {
