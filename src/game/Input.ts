@@ -63,9 +63,15 @@ export class Input {
     });
   }
 
+  // Set by the game when an overlay (e.g. SHOP) is open. While true,
+  // the input axis returns (0,0) so the hero can't be moved by the
+  // player. Camera orbit is handled separately and still works.
+  frozen = false;
+
   axis(): { x: number; z: number } {
     // Movement: W/S always. A/D strafe (left/right), working together
     // with W or S. Q/E are reserved for camera orbit (see Game.ts).
+    if (this.frozen) return { x: 0, z: 0 };
     let x = 0, z = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) z -= 1;
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) z += 1;

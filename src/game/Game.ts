@@ -77,9 +77,11 @@ export class Game {
   private replay = new ReplayRecorder();
   private replayStartedAt = 0;
 
-  // Shop open state — when true, the world is frozen so the player
-  // can spend score without being shot by the new level's enemies.
+  // Shop open state — when true, the world keeps running but the
+  // hero is locked in place and cannot receive damage. Enemies
+  // patrol and the player can orbit the camera with RMB/Q/E.
   private shopOpen = false;
+  private shopDamagePaused = false;
 
   world!: World;
   hero!: Hero;
@@ -293,12 +295,16 @@ export class Game {
   /** Open the shop overlay (called after the level cinematic). */
   openShop() {
     this.shopOpen = true;
+    this.shopDamagePaused = true;
+    this.input.frozen = true;
     this.hud.setShop(true);
   }
 
   /** Close the shop and resume the world. */
   closeShop() {
     this.shopOpen = false;
+    this.shopDamagePaused = false;
+    this.input.frozen = false;
     this.hud.setShop(false);
   }
 
@@ -720,14 +726,13 @@ export class Game {
     }
 
     // Shop lock: while the SHOP overlay is open (after a level clear,
-    // before continuing), no enemies move, no projectiles fly, no
-    // damage ticks. The player needs a calm window to spend their
-    // score on upgrades without being shot by the next level's
-    // enemies that were just spawned.
-    if (this.shopOpen) {
-      this.input.consumeOrbit();
-      return;
-    }
+    // before continuing), the hero is locked in place but the world
+    // keeps running. Enemies patrol, fragments hover, projectiles
+    // fly, the camera can orbit. The hero just doesn't take damage
+    // and can't be moved by the player. The level has effectively
+    // "started" already — the player can see it — but they get a
+    // safe window to spend their score on upgrades first.
+    this.shopDamagePaused = this.shopOpen;
 
     // Camera orbit input → controller
     const orbit = this.input.consumeOrbit();
@@ -875,7 +880,7 @@ export class Game {
           this.shake(0.15, 0.1);
         }
       }
-      if (e.alive && e.group.position.distanceTo(this.hero.group.position) < 1.4) {
+      if (e.alive && e.group.position.distanceTo(this.hero.group.position) < 1.4 && !this.shopDamagePaused) {
         this.damageThisLevel++;
         const dead = this.hero.hurt(1);
         this.hud.setHp(this.hero.hp, this.hero.maxHp);
@@ -888,6 +893,7 @@ export class Game {
       // moving at 14 m/s, so we give the player a fair hitbox.
       for (const p of e.projectiles) {
         if (p.mesh.position.distanceTo(this.hero.group.position) < 2.0) {
+          if (this.shopDamagePaused) { p.life = 0; continue; }
           this.damageThisLevel++;
           p.life = 0;
           this.particles.burst(p.mesh.position.clone(), PALETTE.cyan, 18, 4, 0.5);
@@ -913,7 +919,9 @@ export class Game {
       }
       // Boss contact — INSTAKILL. Touching the master process ends the
       // run immediately (the user wanted a more aggressive threat).
-      if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 4.5) {
+      // Suppressed while the shop is open so the player can shop
+      // without being one-shot by a wandering boss.
+      if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 4.5 && !this.shopDamagePaused) {
         this.damageThisLevel++;
         const dead = this.hero.hurt(999);   // instakill
         this.hud.setHp(this.hero.hp, this.hero.maxHp);
