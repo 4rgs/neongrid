@@ -77,6 +77,10 @@ export class Game {
   private replay = new ReplayRecorder();
   private replayStartedAt = 0;
 
+  // Shop open state — when true, the world is frozen so the player
+  // can spend score without being shot by the new level's enemies.
+  private shopOpen = false;
+
   world!: World;
   hero!: Hero;
   private fragments: Fragment[] = [];
@@ -288,11 +292,15 @@ export class Game {
 
   /** Open the shop overlay (called after the level cinematic). */
   openShop() {
+    this.shopOpen = true;
     this.hud.setShop(true);
   }
 
-  /** Close the shop. */
-  closeShop() { this.hud.setShop(false); }
+  /** Close the shop and resume the world. */
+  closeShop() {
+    this.shopOpen = false;
+    this.hud.setShop(false);
+  }
 
   /** Buy an upgrade if affordable. Returns true on success. */
   buyUpgrade(kind: 'hp' | 'dash' | 'attack' | 'speed'): boolean {
@@ -636,6 +644,16 @@ export class Game {
       // cinematic ends.
       this.input.consumeOrbit();
       this.cine.update(dt, t);
+      return;
+    }
+
+    // Shop lock: while the SHOP overlay is open (after a level clear,
+    // before continuing), no enemies move, no projectiles fly, no
+    // damage ticks. The player needs a calm window to spend their
+    // score on upgrades without being shot by the next level's
+    // enemies that were just spawned.
+    if (this.shopOpen) {
+      this.input.consumeOrbit();
       return;
     }
 
