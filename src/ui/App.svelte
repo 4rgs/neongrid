@@ -7,7 +7,7 @@ let fragmentsTotal = $state(0);
 let hp = $state(6);
 let hpMax = $state(6);
 let sector = $state('GRID HUB');
-let lore = $state<string | null>('WASD move · A/D alone or Q/E orbit camera · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
+let lore = $state<string | null>('W/S move · A/D orbit camera · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
 let gameOver = $state(false);
 let paused = $state(false);
 let bossHp = $state(0);
@@ -445,8 +445,9 @@ let minimapCanvas: HTMLCanvasElement;
         <div class="tutorial-title">NEONGRID</div>
         <div class="tutorial-sub">// survival protocol v0.1</div>
         <div class="tutorial-grid">
-          <div class="tutorial-row"><span class="key">WASD</span> move (cam-relative)</div>
-          <div class="tutorial-row"><span class="key">A / D</span> orbit camera (when W/S not held) · strafe with W/S</div>
+          <div class="tutorial-row"><span class="key">W / S</span> move forward / back (cam-relative)</div>
+          <div class="tutorial-row"><span class="key">A / D</span> orbit camera (LEFT / RIGHT) — hero never moves</div>
+          <div class="tutorial-row"><span class="key">W + A</span> walk forward while looking left (combined)</div>
           <div class="tutorial-row"><span class="key">Q / E</span> orbit camera (alias)</div>
           <div class="tutorial-row"><span class="key">R / F</span> tilt camera up/down</div>
           <div class="tutorial-row"><span class="key">SHIFT</span> dash (with i-frames)</div>

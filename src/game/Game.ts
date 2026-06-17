@@ -574,20 +574,14 @@ export class Game {
     const orbit = this.input.consumeOrbit();
     if (orbit.dx !== 0 || orbit.dy !== 0) this.camCtl.applyOrbit(orbit.dx, orbit.dy);
 
-    // Keyboard camera orbit — so you can play without a mouse:
-    //   A / LeftArrow  → rotate camera LEFT  (yaw +)
-    //   D / RightArrow → rotate camera RIGHT (yaw -)
-    //   Q              → rotate camera LEFT  (alias)
-    //   E              → rotate camera RIGHT (alias)
-    // The "real" strafe is only available when W or S is also held:
-    //   W + A/D strafes  ·  A/D alone orbits.
-    const hasForward = this.input.held('KeyW') || this.input.held('KeyS')
-                    || this.input.held('ArrowUp') || this.input.held('ArrowDown');
+    // Keyboard camera orbit — A/D (or Q/E, or arrow left/right) always
+    // orbit the camera; they never move the hero. Combine with W/S
+    // for "walk forward while looking around" feel.
     const turnLeft  = this.input.held('KeyA') || this.input.held('KeyQ') || this.input.held('ArrowLeft');
     const turnRight = this.input.held('KeyD') || this.input.held('KeyE') || this.input.held('ArrowRight');
     const ORBIT_SPEED = 2.2; // rad/sec; ~126°/s
-    if (turnLeft && !hasForward)  this.camCtl.applyOrbit(-ORBIT_SPEED * 60 * dt, 0);
-    if (turnRight && !hasForward) this.camCtl.applyOrbit( ORBIT_SPEED * 60 * dt, 0);
+    if (turnLeft)  this.camCtl.applyOrbit(-ORBIT_SPEED * 60 * dt, 0);
+    if (turnRight) this.camCtl.applyOrbit( ORBIT_SPEED * 60 * dt, 0);
     // Vertical camera tilt via R/F
     if (this.input.held('KeyR')) this.camCtl.applyOrbit(0,  1.0 * 60 * dt);
     if (this.input.held('KeyF')) this.camCtl.applyOrbit(0, -1.0 * 60 * dt);
