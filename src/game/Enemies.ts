@@ -278,15 +278,22 @@ export class Enemy {
       // spin
       this.group.rotation.y += dt * 2;
       if (this.shootCd <= 0 && dist < 22) {
-        // 3 bullets in a 30° fan
-        const baseDir = playerPos.clone().sub(this.group.position).setY(0).normalize();
+        // 3 bullets in a 30° fan — also flatten to hero Y so they connect.
+        const baseDir = new THREE.Vector3(
+          playerPos.x - this.group.position.x,
+          0,                                 // aim horizontally
+          playerPos.z - this.group.position.z,
+        );
+        if (baseDir.lengthSq() < 0.01) baseDir.set(0, 0, 1);
+        baseDir.normalize();
         const angle = Math.atan2(baseDir.x, baseDir.z);
         for (let i = -1; i <= 1; i++) {
           const a = angle + i * 0.35;
           const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
           const start = this.group.position.clone();
+          start.y = playerPos.y + 0.3;
           const m = new THREE.Mesh(
-            new THREE.SphereGeometry(0.15, 8, 6),
+            new THREE.SphereGeometry(0.18, 8, 6),
             new THREE.MeshBasicMaterial({ color: PALETTE.magenta }),
           );
           m.position.copy(start);
@@ -309,10 +316,24 @@ export class Enemy {
   }
 
   private shoot(playerPos: THREE.Vector3, speedMul = 1) {
-    const dir = playerPos.clone().sub(this.group.position).setY(0.7).normalize();
-    const start = this.group.position.clone().add(new THREE.Vector3(0, 0.7, 0));
+    // Aim at the hero's body, not 0.7m above. We subtract the turret's
+    // own Y so the projectile travels on a flat horizontal line that
+    // will actually intersect the hero at his current height.
+    const heroY = playerPos.y;       // hero is on the terrain (~0)
+    const dir = new THREE.Vector3(
+      playerPos.x - this.group.position.x,
+      heroY - this.group.position.y,
+      playerPos.z - this.group.position.z,
+    );
+    // If the hero is roughly at the same height, flatten the dir to XZ so
+    // the projectile travels straight at him rather than arcing.
+    if (Math.abs(dir.y) < 0.5) dir.y = 0;
+    dir.normalize();
+    const start = this.group.position.clone();
+    // Raise the start a bit so the projectile spawns at the hero's chest
+    start.y = heroY + 0.3;
     const m = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18, 8, 6),
+      new THREE.SphereGeometry(0.22, 8, 6),
       new THREE.MeshBasicMaterial({ color: PALETTE.cyan }),
     );
     m.position.copy(start);

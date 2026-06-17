@@ -502,7 +502,7 @@ export class Game {
         if (dead) { this.gameOver = true; this.hud.setGameOver(true); this.audio.ambientStop(); }
       }
       for (const p of e.projectiles) {
-        if (p.mesh.position.distanceTo(this.hero.group.position) < 1.0) {
+        if (p.mesh.position.distanceTo(this.hero.group.position) < 1.4) {
           p.life = 0;
           this.particles.burst(p.mesh.position.clone(), PALETTE.cyan, 14, 3, 0.4);
           const dead = this.hero.hurt(1);
