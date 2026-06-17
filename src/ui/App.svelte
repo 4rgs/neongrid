@@ -66,6 +66,12 @@ let isMobile = $state(false);
 let minimapData = $state<{ x: number; y: number; yaw: number } | null>(null);
 // Subscribe via raf polling
 let minimapCanvas: HTMLCanvasElement;
+// Mobile: tap the minimap to toggle between the 60x60 collapsed
+// view and the 160x160 expanded view. Expanded overlay sits on top
+// of the gameplay so the player can read sector / enemy positions
+// without losing screen real estate. Default to collapsed (false)
+// so the HUD stays light by default.
+let minimapExpanded = $state(false);
 
   $effect(() => {
     const api = {
@@ -181,6 +187,11 @@ let minimapCanvas: HTMLCanvasElement;
     let forceMobile = false;
     try { forceMobile = new URLSearchParams(window.location.search).get('mobile') === '1'; } catch {}
     isMobile = forceMobile || mobileUA || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    // Toggle a `mobile` class on <body> so CSS rules can scope HUD
+    // overrides to mobile without depending on @media queries
+    // (which would fail when the desktop browser window is wide
+    // but the game is in forced-mobile mode for QA).
+    try { document.body.classList.toggle('mobile', isMobile); } catch {}
     return () => {};
   });
 
@@ -427,7 +438,13 @@ let minimapCanvas: HTMLCanvasElement;
   </div>
 
   <div class="hud-top-right">
-    <div class="hud-minimap-vert">
+    <div class="hud-minimap-vert"
+      class:expanded={minimapExpanded}
+      onclick={() => isMobile && (minimapExpanded = !minimapExpanded)}
+      onkeydown={(e) => isMobile && (e.key === 'Enter' || e.key === ' ') && (minimapExpanded = !minimapExpanded)}
+      role="button"
+      tabindex="0"
+      title={minimapExpanded ? 'Tap to collapse' : 'Tap to expand'}>
       <div class="hud-label">MAP</div>
       <canvas bind:this={minimapCanvas} width="160" height="160"></canvas>
     </div>
@@ -483,8 +500,8 @@ let minimapCanvas: HTMLCanvasElement;
     <div class="hud-lore">{lore}</div>
   {/if}
 
-  {#if controlsMessage && !isMobile}
-    <div class="hud-controls">{controlsMessage}</div>
+  {#if controlsMessage}
+    <div class="hud-controls" class:mobile={isMobile}>{controlsMessage}</div>
   {/if}
 
   {#if showLeaderboardPage}
@@ -1967,5 +1984,93 @@ let minimapCanvas: HTMLCanvasElement;
     background: var(--orange);
     color: black;
     text-shadow: none;
+  }
+
+  /* ─── Mobile HUD overrides ────────────────────────────────────────
+   * On mobile the desktop HUD eats most of the screen — the
+   * minimap is 160x160, the bottom-left health bar is min-width
+   * 220px, the bottom-right fragment counter is full-width text,
+   * and the controls banner sits in the middle of the viewport
+   * over the gameplay. The overrides below compress every corner
+   * of the HUD so the player can actually see what they're
+   * playing, while still showing the same data. The minimap
+   * collapses to 60x60 and expands on tap; the controls banner
+   * moves to the very bottom so it doesn't fight the joystick
+   * or the action buttons for screen real estate.
+   *
+   * Scoped to `body.mobile` (toggled by the detection effect)
+   * instead of a @media query, so forced-mobile QA via
+   * `?mobile=1` works on a wide browser window as well.
+   * ----------------------------------------------------------------*/
+  /* :global() because body is outside the Svelte component scope;
+   * the detection $effect toggles document.body.classList. Inside
+   * the block we can keep using regular class selectors — the
+   * global selector only needs to reach the body's class match. */
+  :global(body.mobile) {
+    /* Compact corner cards: 4-6px padding, no min-width,
+     * smaller fonts. The HUD becomes 2-3 thin strips in the
+     * corners instead of four 200px blocks. */
+    .hud-top-left, .hud-top-right,
+    .hud-bottom-left, .hud-bottom-right,
+    .hud-boss { padding: 4px 8px; }
+    .hud-top-left, .hud-bottom-left, .hud-bottom-right,
+    .hud-boss { min-width: 0; }
+    .hud-label { font-size: 8px; letter-spacing: 1px; margin-bottom: 2px; }
+    .hud-value { font-size: 11px; letter-spacing: 1px; }
+    .hud-value.big { font-size: 16px; }
+    .hud-value.small { font-size: 9px; }
+    .hud-best, .hud-level { font-size: 8px; margin-top: 2px; }
+    /* Settings / leaderboard buttons: 22x22 so they don't
+     * compete with the action buttons for space. */
+    .hud-settings-btn, .hud-lb-btn {
+      width: 22px; height: 22px; margin-top: 3px; font-size: 11px;
+    }
+    /* Top-right layout: minimap on its own row (collapsed),
+     * then score + best + buttons stacked to the left of it.
+     * In expanded mode the minimap pops up centered on the
+     * screen so it doesn't collide with the score column. */
+    .hud-top-right {
+      flex-direction: row; align-items: flex-start; gap: 6px;
+    }
+    /* Minimap: collapsed 60x60 with a "tap to expand" hint,
+     * expanded 160x160 floating overlay. The canvas internal
+     * resolution stays 160x160 (pixelated upscale for the
+     * collapsed view). */
+    .hud-minimap-vert {
+      padding: 4px; cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .hud-minimap-vert .hud-label { display: none; }
+    .hud-minimap-vert canvas { width: 60px; height: 60px; }
+    .hud-minimap-vert.expanded {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 8px; background: rgba(0, 20, 30, 0.85);
+      border: 1px solid var(--cyan);
+      box-shadow: 0 0 24px rgba(0, 240, 255, 0.4); z-index: 9;
+    }
+    .hud-minimap-vert.expanded .hud-label {
+      display: block; text-align: center; margin-bottom: 4px;
+    }
+    .hud-minimap-vert.expanded canvas { width: 160px; height: 160px; }
+    /* Score column: text-align right, tighter. */
+    .hud-top-right-stack { padding: 4px 8px; min-width: 0; }
+    /* Boss HP: compact under the SECTOR label. */
+    .hud-boss { top: 70px; }
+    /* Controls banner: at the very bottom of the screen, under
+     * the joystick / action buttons, so it doesn't sit in the
+     * middle of the 3D render. Smaller font, narrower. */
+    .hud-controls {
+      bottom: 8px; left: 50%; transform: translateX(-50%);
+      padding: 4px 8px; font-size: 9px; letter-spacing: 0;
+      max-width: calc(100vw - 220px);  /* leave room for joystick + actions */
+      line-height: 1.3;
+    }
+    /* Lore (// RESPAWN, // wave 1 incoming) is the only mid-screen
+     * text and stays mid-screen because it's short and transient. */
+    .hud-lore { font-size: 10px; padding: 4px 8px; bottom: 60px; }
+    /* Top-3 widget: hide on mobile (3 lines of text are 80px tall,
+     * more screen space than the player can spare). */
+    .top3-widget { display: none; }
   }
 </style>
