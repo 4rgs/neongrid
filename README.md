@@ -4,7 +4,14 @@
 > single program inside the Grid: collect code fragments, fight viruses,
 > survive the procedural terrain, and bring down the Master Process.
 
-![NeonGrid hero](https://raw.githubusercontent.com/<owner>/neongrid/main/.github/hero.png)
+![NeonGrid](https://img.shields.io/badge/Three.js-r180-000?logo=three.js)
+![NeonGrid](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte)
+![NeonGrid](https://img.shields.io/badge/Cloudflare-Pages-F38020?logo=cloudflare)
+![NeonGrid](https://img.shields.io/badge/license-MIT-green)
+![NeonGrid](https://img.shields.io/badge/bundle-172KB-blue)
+
+> Built by replicating the procedural Three.js + postprocessing stack
+> used by [messenger.abeto.co](https://messenger.abeto.co/) (abeto studio).
 
 ---
 
@@ -159,14 +166,6 @@ Permissions-Policy).
 | `three` (lazy) | 122.21 KB |
 | **First paint total** | **~50 KB** |
 | **Cold load total** | **~172 KB** |
-
-## Credits
-
-Inspired by **messenger.abeto.co** by abeto studio, whose procedural
-Three.js + postprocessing stack and chunk-splitting patterns were the
-foundation for this project.
-
-Three.js, postprocessing (pmndrs), Svelte 5, Vite.
 
 ## License
 
