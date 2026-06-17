@@ -76,10 +76,12 @@ export class Component {
         this.group.add(pin);
       }
     }
-    this.group.add(new THREE.LineSegments(
+    const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(body.geometry),
       new THREE.LineBasicMaterial({ color: PALETTE.cyan, transparent: true, opacity: 0.7 }),
-    ));
+    );
+    edges.position.y = h * 0.5;
+    this.group.add(edges);
   }
 
   private buildCap() {
@@ -101,10 +103,12 @@ export class Component {
     top.rotation.x = -Math.PI / 2;
     top.position.y = h + 0.001;
     this.group.add(top);
-    this.group.add(new THREE.LineSegments(
+    const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(body.geometry),
       new THREE.LineBasicMaterial({ color: PALETTE.cyan, transparent: true, opacity: 0.7 }),
-    ));
+    );
+    edges.position.y = h * 0.5;
+    this.group.add(edges);
   }
 
   private buildResistor() {
@@ -195,10 +199,12 @@ export class Component {
         this.group.add(p);
       }
     }
-    this.group.add(new THREE.LineSegments(
+    const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(body.geometry),
       new THREE.LineBasicMaterial({ color: PALETTE.cyan }),
-    ));
+    );
+    edges.position.y = h * 0.5;
+    this.group.add(edges);
   }
 
   private buildTower() {
@@ -231,10 +237,12 @@ export class Component {
     );
     ser.position.y = h * 0.5;
     this.group.add(ser);
-    this.group.add(new THREE.LineSegments(
+    const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(body.geometry),
       new THREE.LineBasicMaterial({ color: PALETTE.cyan, transparent: true, opacity: 0.7 }),
-    ));
+    );
+    edges.position.y = h * 0.5;
+    this.group.add(edges);
   }
 
   contains(x: number, z: number): boolean {

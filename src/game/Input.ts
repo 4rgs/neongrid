@@ -64,12 +64,13 @@ export class Input {
   }
 
   axis(): { x: number; z: number } {
-    // Movement: W/S only. A/D never moves the hero — they only orbit
-    // the camera. With W+A or W+D the hero moves forward while the
-    // camera rotates, giving a "look around while walking" feel.
+    // Movement: W/S always. A/D strafe (left/right), working together
+    // with W or S. Q/E are reserved for camera orbit (see Game.ts).
     let x = 0, z = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) z -= 1;
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) z += 1;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) x -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) x += 1;
     const len = Math.hypot(x, z);
     if (len > 0) { x /= len; z /= len; }
     return { x, z };

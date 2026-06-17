@@ -642,11 +642,11 @@ export class Game {
     const mouse = { dx: orbit.dx, dy: orbit.dy, btnL: this.input.isLmbDown(), btnR: this.input.isRmbDown() };
     this.replay.record(dt, t, this.input.keysHeld(), mouse);
 
-    // Keyboard camera orbit — A/D (or Q/E, or arrow left/right) always
-    // orbit the camera; they never move the hero. Combine with W/S
-    // for "walk forward while looking around" feel.
-    const turnLeft  = this.input.held('KeyA') || this.input.held('KeyQ') || this.input.held('ArrowLeft');
-    const turnRight = this.input.held('KeyD') || this.input.held('KeyE') || this.input.held('ArrowRight');
+    // Keyboard camera orbit — Q/E (or U/O) orbit the camera. A/D
+    // remain reserved for strafe (with W/S). Combine W+A for
+    // "walk forward while looking around" feel: WASD strafe + Q/E orbit.
+    const turnLeft  = this.input.held('KeyQ') || this.input.held('KeyU') || this.input.held('ArrowLeft');
+    const turnRight = this.input.held('KeyE') || this.input.held('KeyO') || this.input.held('ArrowRight');
     const ORBIT_SPEED = 2.2; // rad/sec; ~126°/s
     if (turnLeft)  this.camCtl.applyOrbit(-ORBIT_SPEED * 60 * dt, 0);
     if (turnRight) this.camCtl.applyOrbit( ORBIT_SPEED * 60 * dt, 0);
