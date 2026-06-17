@@ -7,7 +7,7 @@ let fragmentsTotal = $state(0);
 let hp = $state(6);
 let hpMax = $state(6);
 let sector = $state('GRID HUB');
-let lore = $state<string | null>('WASD move · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
+let lore = $state<string | null>('WASD move · A/D alone or Q/E orbit camera · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
 let gameOver = $state(false);
 let paused = $state(false);
 let bossHp = $state(0);
@@ -369,7 +369,7 @@ let minimapCanvas: HTMLCanvasElement;
         </div>
         <div class="settings-row">
           <span class="settings-key">CAMERA</span>
-          <span class="settings-val">RMB drag · Scroll</span>
+          <span class="settings-val">A/D · Q/E · R/F · RMB · Scroll</span>
         </div>
         <div class="settings-row">
           <span class="settings-key">PAUSE</span>
@@ -398,13 +398,16 @@ let minimapCanvas: HTMLCanvasElement;
         <div class="tutorial-title">NEONGRID</div>
         <div class="tutorial-sub">// survival protocol v0.1</div>
         <div class="tutorial-grid">
-          <div class="tutorial-row"><span class="key">WASD</span> move (camera-relative)</div>
+          <div class="tutorial-row"><span class="key">WASD</span> move (cam-relative)</div>
+          <div class="tutorial-row"><span class="key">A / D</span> orbit camera (when W/S not held) · strafe with W/S</div>
+          <div class="tutorial-row"><span class="key">Q / E</span> orbit camera (alias)</div>
+          <div class="tutorial-row"><span class="key">R / F</span> tilt camera up/down</div>
           <div class="tutorial-row"><span class="key">SHIFT</span> dash (with i-frames)</div>
           <div class="tutorial-row"><span class="key">SPACE</span> jump</div>
           <div class="tutorial-row"><span class="key">J / LMB</span> disc-whip attack</div>
-          <div class="tutorial-row"><span class="key">RMB drag</span> orbit camera</div>
+          <div class="tutorial-row"><span class="key">RMB drag</span> orbit camera (mouse)</div>
           <div class="tutorial-row"><span class="key">Scroll</span> zoom in/out</div>
-          <div class="tutorial-row"><span class="key">ESC / P</span> pause</div>
+          <div class="tutorial-row"><span class="key">ESC / P</span> pause · M settings</div>
         </div>
         <div class="tutorial-mission">// mission: collect 9 fragments to challenge the master process</div>
         <div class="tutorial-cta">click or press any key to begin</div>
