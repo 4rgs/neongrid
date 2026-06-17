@@ -12,6 +12,7 @@ export class Input {
   private _attackEdge = false;
   // mouse for camera orbit
   private _rmbDown = false;
+  private _lmbDown = false;
   private _lastMx = 0;
   private _lastMy = 0;
   // accumulated orbit deltas, consumed per frame
@@ -87,6 +88,8 @@ export class Input {
     return v;
   }
   isRmbDown(): boolean { return this._rmbDown; }
+  isLmbDown(): boolean { return this._lmbDown; }
+  keysHeld(): string[] { return Array.from(this.keys); }
 
   held(code: string): boolean { return this.keys.has(code); }
 

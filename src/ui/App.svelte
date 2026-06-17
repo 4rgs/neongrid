@@ -42,10 +42,16 @@ let highScores = $state<{ name: string; score: number; level: number; time: numb
 // Top-3 widget
 let top3 = $state<{ rank: number; name: string; score: number; avatar?: string; country?: string }[]>([]);
 // Leaderboard page (full overlay)
-let showLeaderboardPage = $state(false);
-let lbPeriod = $state<'all' | 'daily' | 'weekly'>('all');
-let lbLoading = $state(false);
-let selectedAvatar = $state<string>('code');
+  let showLeaderboardPage = $state(false);
+  let lbPeriod = $state<'all' | 'daily' | 'weekly'>('all');
+  let lbRegion = $state<string>('');   // '' = all, otherwise NA/SA/EU/AS/OC/AF/AN
+  let lbLoading = $state(false);
+  let selectedAvatar = $state<string>('code');
+  // Profile page (per-player)
+  let showProfilePage = $state(false);
+  let profileName = $state<string>('');
+  let profile = $state<any>(null);
+  let profileLoading = $state(false);
 // Mobile
 let isMobile = $state(false);
 // Minimap state
@@ -106,6 +112,16 @@ let minimapCanvas: HTMLCanvasElement;
       askForName: (defaultName: string) => {
         pendingName = defaultName || 'PROGRAMMER';
         askForName = true;
+      },
+      openProfile: (name: string) => {
+        profileName = name;
+        showProfilePage = true;
+        showLeaderboardPage = false;
+        profileLoading = true;
+        (window as any).__game?.fetchProfile?.(name).then((p: any) => {
+          profile = p;
+          profileLoading = false;
+        });
       },
       submitWithName: (name: string) => {
         (window as any).__game?.submitWithName(name);
@@ -365,9 +381,15 @@ let minimapCanvas: HTMLCanvasElement;
       <div class="lb-card" onclick={(e) => e.stopPropagation()} role="presentation">
         <div class="lb-title">// GLOBAL LEADERBOARD //</div>
         <div class="lb-period">
-          <button class="lb-period-btn" class:active={lbPeriod === 'all'}    onclick={() => { lbPeriod = 'all';    (window as any).__game?.openLeaderboardPage('all'); }}>ALL TIME</button>
-          <button class="lb-period-btn" class:active={lbPeriod === 'daily'}  onclick={() => { lbPeriod = 'daily';  (window as any).__game?.openLeaderboardPage('daily'); }}>TODAY</button>
-          <button class="lb-period-btn" class:active={lbPeriod === 'weekly'} onclick={() => { lbPeriod = 'weekly'; (window as any).__game?.openLeaderboardPage('weekly'); }}>THIS WEEK</button>
+          <button class="lb-period-btn" class:active={lbPeriod === 'all'}    onclick={() => { lbPeriod = 'all';    (window as any).__game?.openLeaderboardPage('all', { region: lbRegion }); }}>ALL TIME</button>
+          <button class="lb-period-btn" class:active={lbPeriod === 'daily'}  onclick={() => { lbPeriod = 'daily';  (window as any).__game?.openLeaderboardPage('daily', { region: lbRegion }); }}>TODAY</button>
+          <button class="lb-period-btn" class:active={lbPeriod === 'weekly'} onclick={() => { lbPeriod = 'weekly'; (window as any).__game?.openLeaderboardPage('weekly', { region: lbRegion }); }}>THIS WEEK</button>
+        </div>
+        <div class="lb-region">
+          <span class="lb-region-label">REGION</span>
+          {#each ['', 'NA', 'SA', 'EU', 'AS', 'OC', 'AF'] as r}
+            <button class="lb-region-btn" class:active={lbRegion === r} onclick={() => { lbRegion = r; (window as any).__game?.openLeaderboardPage(lbPeriod, { region: r }); }}>{r || 'ALL'}</button>
+          {/each}
         </div>
         <div class="lb-avatar-pick">
           <span class="lb-avatar-label">YOUR AVATAR</span>
@@ -383,7 +405,7 @@ let minimapCanvas: HTMLCanvasElement;
               <div class="lb-row" class:lb-row-you={globalRank !== null && entry.rank === globalRank}>
                 <span class="lb-rank">#{entry.rank}</span>
                 <span class="lb-avatar-mini avatar-{entry.avatar || 'code'}"></span>
-                <span class="lb-name">{entry.name}</span>
+                <button class="lb-name lb-name-btn" onclick={() => (window as any).__hud?.openProfile(entry.name)}>{entry.name}</button>
                 <span class="lb-score">{entry.score.toString().padStart(7, '0')}</span>
                 <span class="lb-lv">L{entry.level.toString().padStart(2, '0')}</span>
                 <span class="lb-time">{formatTimeShort(entry.time)}</span>
@@ -397,7 +419,63 @@ let minimapCanvas: HTMLCanvasElement;
         <div class="lb-actions">
           <button class="lb-btn" onclick={() => showLeaderboardPage = false}>CLOSE</button>
         </div>
-        <div class="lb-hint">press L to toggle · period refreshes on game-over</div>
+        <div class="lb-hint">press L to toggle · click a name to view profile</div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showProfilePage}
+    <div class="profile-overlay" onclick={() => showProfilePage = false} role="presentation">
+      <div class="profile-card" onclick={(e) => e.stopPropagation()} role="presentation">
+        <div class="profile-title">// PLAYER PROFILE //</div>
+        <div class="profile-name">{profileName}</div>
+        {#if profileLoading}
+          <div class="profile-loading">// loading... //</div>
+        {:else if profile}
+          <div class="profile-stats">
+            <div class="profile-stat">
+              <span class="profile-stat-label">BEST</span>
+              <span class="profile-stat-value">{profile.best?.toString().padStart(7, '0') ?? '0'}</span>
+            </div>
+            <div class="profile-stat">
+              <span class="profile-stat-label">RUNS</span>
+              <span class="profile-stat-value">{profile.runs ?? 0}</span>
+            </div>
+            <div class="profile-stat">
+              <span class="profile-stat-label">TIME</span>
+              <span class="profile-stat-value">{formatTimeShort(profile.totalTime ?? 0)}</span>
+            </div>
+            <div class="profile-stat">
+              <span class="profile-stat-label">COUNTRY</span>
+              <span class="profile-stat-value">{profile.country || '??'}</span>
+            </div>
+          </div>
+          <div class="profile-history-label">// LAST {profile.history?.length ?? 0} RUNS //</div>
+          {#if profile.history && profile.history.length > 0}
+            <div class="profile-history">
+              {#each profile.history.slice(0, 20) as h}
+                <div class="profile-history-row">
+                  <span class="ph-score">{h.score?.toString().padStart(7, '0') ?? '0'}</span>
+                  <span class="ph-lv">L{h.level?.toString().padStart(2, '0') ?? '00'}</span>
+                  <span class="ph-time">{formatTimeShort(h.time ?? 0)}</span>
+                  <span class="ph-when">{new Date(h.when ?? 0).toLocaleDateString()}</span>
+                  <span class="ph-avatar avatar-{h.avatar || 'code'}"></span>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="profile-empty">// no runs found //</div>
+          {/if}
+          <div class="profile-actions">
+            <button class="profile-btn" onclick={() => { lbPeriod = 'all'; (window as any).__game?.openLeaderboardPage('all', { name: profileName }); showProfilePage = false; showLeaderboardPage = true; }}>VIEW RANKS</button>
+            <button class="profile-btn" onclick={() => showProfilePage = false}>CLOSE</button>
+          </div>
+        {:else}
+          <div class="profile-empty">// player not found //</div>
+          <div class="profile-actions">
+            <button class="profile-btn" onclick={() => showProfilePage = false}>CLOSE</button>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -864,6 +942,141 @@ let minimapCanvas: HTMLCanvasElement;
   }
   .lb-btn:hover { background: var(--cyan); color: black; }
   .lb-hint { text-align: center; font-size: 9px; color: rgba(0, 240, 255, 0.5); margin-top: 8px; }
+  .lb-region { display: flex; gap: 4px; align-items: center; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .lb-region-label {
+    color: var(--green);
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-shadow: 0 0 6px var(--green);
+    margin-right: 6px;
+  }
+  .lb-region-btn {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    padding: 4px 10px;
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 2px;
+    cursor: pointer;
+  }
+  .lb-region-btn:hover { background: rgba(0, 255, 136, 0.18); }
+  .lb-region-btn.active { background: var(--green); color: black; text-shadow: none; }
+  .lb-name-btn {
+    background: transparent;
+    border: none;
+    color: var(--cyan);
+    text-align: left;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: inherit;
+    padding: 0;
+  }
+  .lb-name-btn:hover { color: var(--orange); text-decoration: underline; }
+
+  /* ─── Profile page overlay ───────────────────────────────────────────── */
+  .profile-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    z-index: 31;
+    animation: fade-in 0.3s ease;
+  }
+  .profile-card {
+    border: 1px solid var(--green);
+    background: rgba(0, 20, 30, 0.95);
+    padding: 22px 28px;
+    box-shadow: 0 0 32px var(--green);
+    min-width: 540px;
+    max-width: 680px;
+    max-height: 84vh;
+    overflow-y: auto;
+  }
+  .profile-title {
+    font-size: 20px;
+    color: var(--green);
+    text-shadow: 0 0 12px var(--green);
+    letter-spacing: 6px;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+  .profile-name {
+    font-size: 28px;
+    color: var(--orange);
+    text-shadow: 0 0 16px var(--orange);
+    letter-spacing: 8px;
+    text-align: center;
+    margin-bottom: 18px;
+  }
+  .profile-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .profile-stat {
+    border: 1px solid var(--green);
+    padding: 8px;
+    text-align: center;
+    background: rgba(0, 255, 136, 0.06);
+  }
+  .profile-stat-label {
+    display: block;
+    font-size: 9px;
+    color: var(--green);
+    letter-spacing: 2px;
+    text-shadow: 0 0 4px var(--green);
+  }
+  .profile-stat-value {
+    display: block;
+    font-size: 16px;
+    color: var(--cyan);
+    text-shadow: 0 0 6px var(--cyan);
+    margin-top: 2px;
+  }
+  .profile-history-label {
+    font-size: 10px;
+    color: var(--cyan);
+    letter-spacing: 2px;
+    text-shadow: 0 0 6px var(--cyan);
+    margin-bottom: 8px;
+    text-align: center;
+  }
+  .profile-history { margin-bottom: 14px; }
+  .profile-history-row {
+    display: grid;
+    grid-template-columns: 80px 32px 60px 100px 18px;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .ph-score { color: var(--orange); text-align: right; text-shadow: 0 0 6px var(--orange); }
+  .ph-lv { color: var(--cyan); text-align: center; }
+  .ph-time { color: var(--cyan); opacity: 0.7; text-align: center; }
+  .ph-when { color: rgba(0, 240, 255, 0.6); text-align: center; }
+  .profile-actions { text-align: center; margin-top: 14px; display: flex; gap: 10px; justify-content: center; }
+  .profile-btn {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    padding: 8px 22px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 4px;
+    cursor: pointer;
+  }
+  .profile-btn:hover { background: var(--green); color: black; }
+  .profile-loading, .profile-empty {
+    text-align: center;
+    color: rgba(0, 240, 255, 0.6);
+    padding: 24px 0;
+  }
   .hud-value.small {
     font-size: 12px;
     opacity: 0.8;

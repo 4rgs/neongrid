@@ -48,6 +48,7 @@ export type Save = {
     achievements: AchievementId[];
     heroName: string;
     avatar: Avatar;
+    lastReplayId?: string;
   };
   settings: {
     volume: number;
@@ -81,6 +82,7 @@ export const DEFAULT_SAVE: Save = {
     achievements: [],
     heroName: 'PROGRAMMER',
     avatar: DEFAULT_AVATAR,
+    lastReplayId: undefined,
   },
   settings: { volume: 0.7 },
   fragments: [],

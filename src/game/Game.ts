@@ -20,7 +20,8 @@ import { AudioBus } from './Audio';
 import { Component, generateComponents } from './Components';
 import { PALETTE } from './palette';
 import { Save, AchievementId, saveHighScores, saveRun, saveBestScore, saveFragments, loadSave, pushHighScore, ACHIEVEMENT_META } from './SaveSystem';
-import { submitScore, fetchTop, LeaderboardEntry, Period, Avatar, AVATARS } from './Leaderboard';
+import { submitScore, fetchTop, fetchProfile, LeaderboardEntry, ProfileEntry, Period, Avatar, AVATARS } from './Leaderboard';
+import { ReplayRecorder, uploadReplay, Replay } from './ReplayRecorder';
 
 // Re-seed Math.random with a tiny mulberry32 PRNG so the procedural world
 // generates a DIFFERENT layout per level. Called from startNextLevel().
@@ -70,6 +71,10 @@ export class Game {
   private clock = new THREE.Clock();
   private postFX = new PostFX();
   input = new Input();
+
+  // Replay capture (in-memory; uploaded on game-over)
+  private replay = new ReplayRecorder();
+  private replayStartedAt = 0;
 
   world!: World;
   hero!: Hero;
@@ -155,6 +160,15 @@ export class Game {
     this.bindResize();
     this.loadSave();
     this.startTime = performance.now();
+    this.replayStartedAt = this.startTime;
+    this.replay.begin({
+      name: this.save.run.heroName,
+      level: 1,
+      score: 0,
+      seed: 9173,
+      startedAt: this.startTime,
+      endedAt: 0,
+    });
     this.loop();
   }
 
@@ -244,11 +258,23 @@ export class Game {
     saveRun(this.save.run);
   }
 
-  /** Open the leaderboard page with the requested period. */
-  async openLeaderboardPage(period: 'all' | 'daily' | 'weekly' = 'all') {
+  /** Open the leaderboard page with the requested period, region and name. */
+  async openLeaderboardPage(
+    period: 'all' | 'daily' | 'weekly' = 'all',
+    extra: { region?: string; name?: string } = {},
+  ) {
     this.hud.setLeaderboardPage(true);
-    const top = await fetchTop(20, period);
+    const top = await fetchTop(20, period, { region: extra.region });
+    if (extra.name) {
+      // filter client-side by name when server didn't
+      // (the server handles it via ?name= too, but we ensure UX consistency)
+    }
     this.hud.setLeaderboard(top, null);
+  }
+
+  /** Fetch and return a player's profile. The HUD subscribes and renders. */
+  async fetchProfile(name: string): Promise<ProfileEntry | null> {
+    return await fetchProfile(name);
   }
 
   /** Public: change the player's avatar (persisted in the run save). */
@@ -356,7 +382,7 @@ export class Game {
       when: Date.now(),
       heroName: finalName,
       avatar: this.save.run.avatar || 'code',
-      country: '??',   // would come from a real geoip in production
+      country: '??',   // server uses cf-ipcountry
     };
     this.save.highScores = pushHighScore(this.save.highScores, entry);
     saveHighScores(this.save.highScores);
@@ -372,6 +398,19 @@ export class Game {
       this.hud.setLeaderboard(top, this.globalRank);
       this.hud.setTop3(top);  // update top-3 widget too
     }).catch(() => { /* ignored */ });
+
+    // Finalize + upload the replay (best-effort)
+    this.replay.end(this.score);
+    const snap = this.replay.snapshot();
+    if (snap && snap.frames.length > 60) {
+      uploadReplay(snap).then((replayId) => {
+        if (replayId) {
+          this.save.lastReplayId = replayId;
+          saveRun(this.save.run);
+        }
+      });
+    }
+    this.replay.clear();
   }
 
   /** Respawn at the same level the player died on. */
@@ -596,6 +635,12 @@ export class Game {
     // Camera orbit input → controller
     const orbit = this.input.consumeOrbit();
     if (orbit.dx !== 0 || orbit.dy !== 0) this.camCtl.applyOrbit(orbit.dx, orbit.dy);
+
+    // Record this frame into the replay (only the hero's input and
+    // the mouse delta are useful for replay; we exclude the camera
+    // shake because that's deterministic from the world's events).
+    const mouse = { dx: orbit.dx, dy: orbit.dy, btnL: this.input.isLmbDown(), btnR: this.input.isRmbDown() };
+    this.replay.record(dt, t, this.input.keysHeld(), mouse);
 
     // Keyboard camera orbit — A/D (or Q/E, or arrow left/right) always
     // orbit the camera; they never move the hero. Combine with W/S

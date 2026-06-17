@@ -118,13 +118,20 @@ export async function shortHash(s: string): Promise<string> {
   return (await sha256Hex(s)).slice(0, 8);
 }
 
-export async function fetchTop(scores = 10, period: Period = 'all'): Promise<LeaderboardEntry[]> {
+export async function fetchTop(scores = 10, period: Period = 'all', extra: { country?: string; region?: string } = {}): Promise<LeaderboardEntry[]> {
   const { at, scores: cached } = readCache(period);
   if (Date.now() - at < CACHE_TTL && cached.length > 0) return cached;
 
+  const params = new URLSearchParams({
+    limit: String(scores),
+    period,
+    ...(extra.country ? { country: extra.country } : {}),
+    ...(extra.region ? { region: extra.region } : {}),
+  });
+
   try {
     const res = await withTimeout(
-      fetch(`/api/scores?limit=${scores}&period=${period}`),
+      fetch('/api/scores?' + params.toString()),
       TIMEOUT_MS,
     );
     if (!res.ok) throw new Error('http ' + res.status);
@@ -133,6 +140,30 @@ export async function fetchTop(scores = 10, period: Period = 'all'): Promise<Lea
     return data.scores || [];
   } catch {
     return cached;
+  }
+}
+
+export type ProfileEntry = {
+  name: string;
+  best: number;
+  runs: number;
+  totalTime: number;
+  country: string;
+  firstSeen: number;
+  lastSeen: number;
+  history: { score: number; level: number; time: number; avatar?: string; country?: string; when: number }[];
+};
+
+export async function fetchProfile(name: string): Promise<ProfileEntry | null> {
+  try {
+    const res = await withTimeout(
+      fetch('/api/profile?name=' + encodeURIComponent(name)),
+      TIMEOUT_MS,
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as ProfileEntry;
+  } catch {
+    return null;
   }
 }
 
