@@ -20,6 +20,7 @@ import { AudioBus } from './Audio';
 import { Component, generateComponents } from './Components';
 import { PALETTE } from './palette';
 import { Save, AchievementId, saveHighScores, saveRun, saveBestScore, saveFragments, loadSave, pushHighScore, ACHIEVEMENT_META } from './SaveSystem';
+import { submitScore, fetchTop, LeaderboardEntry } from './Leaderboard';
 
 // Re-seed Math.random with a tiny mulberry32 PRNG so the procedural world
 // generates a DIFFERENT layout per level. Called from startNextLevel().
@@ -54,6 +55,7 @@ type HudHandle = {
   setShop: (v: boolean) => void;
   setAchievements: (ids: AchievementId[]) => void;
   setGameOverScore: (score: number, level: number, bestScore: number) => void;
+  setLeaderboard: (entries: any[], globalRank: number | null) => void;
 };
 
 export class Game {
@@ -115,6 +117,9 @@ export class Game {
   private shopOffer: 'hp' | 'dash' | 'attack' | 'speed' | null = null;
   // game-over showing high-score entry
   private gameOverScore = 0;
+  // Global leaderboard (top-10, fetched lazily on game-over)
+  private leaderboard: LeaderboardEntry[] = [];
+  private globalRank: number | null = null;
 
   // AABB for gate proximity
   private nearLore: string | null = null;
@@ -324,6 +329,22 @@ export class Game {
 
     this.hud.setGameOverScore(this.score, this.level, newBest);
     this.hud.setGameOver(true);
+
+    // Submit to global leaderboard (async, non-blocking). When it
+    // resolves we update the HUD with the new top-10 + the player's
+    // global rank. If the API is unreachable we just use the
+    // local top-5 fallback.
+    submitScore({
+      name: this.save.run.heroName,
+      score: this.score,
+      level: this.level,
+      time: totalTime,
+    }).then((top) => {
+      this.leaderboard = top;
+      const me = top.find((e) => e.name === this.save.run.heroName && e.score === this.score);
+      this.globalRank = me ? me.rank : null;
+      this.hud.setLeaderboard(top, this.globalRank);
+    }).catch(() => { /* ignored */ });
 
     // Save the run state (level reached + upgrades) so respawn can restore.
     this.save.run.currentLevel = this.level;

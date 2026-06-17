@@ -11,9 +11,17 @@ const appEl = document.getElementById('app')!;
 // Surface any error to the page itself for debugging
 window.addEventListener('error', (e) => {
   console.error('[window.error]', e.message, e.error);
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#400;color:#fff;padding:10px;z-index:9999;font:10px monospace;white-space:pre-wrap;max-height:60vh;overflow:auto;';
+  d.textContent = 'ERR: ' + (e.error?.stack || e.message);
+  document.body.appendChild(d);
 });
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[unhandledrejection]', e.reason);
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#404;color:#fff;padding:10px;z-index:9999;font:10px monospace;white-space:pre-wrap;max-height:40vh;overflow:auto;';
+  d.textContent = 'REJECT: ' + (e.reason?.stack || String(e.reason));
+  document.body.appendChild(d);
 });
 
 /**
@@ -36,8 +44,18 @@ async function waitForHud(): Promise<any> {
 (async () => {
   try {
     // HUD overlay (Svelte 5) — its $effect will populate window.__hud
-    const hud = mount(App, { target: appEl });
-    console.log('[boot] HUD mounted, waiting for api…');
+    let hud: any = null;
+    try {
+      hud = mount(App, { target: appEl });
+      console.log('[boot] HUD mounted, waiting for api…');
+    } catch (svelteErr) {
+      console.error('[boot] Svelte mount failed:', svelteErr);
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#f00;color:#fff;padding:20px;z-index:99999;font:11px monospace;white-space:pre-wrap;';
+      d.textContent = 'SVELTE MOUNT FAILED: ' + (svelteErr instanceof Error ? svelteErr.stack : String(svelteErr));
+      document.body.appendChild(d);
+      return;
+    }
 
     const api = await waitForHud();
     if (!api) {

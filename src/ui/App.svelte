@@ -31,6 +31,10 @@ let justUnlockedName = $state('');
 let gameOverScore = $state(0);
 let gameOverLevel = $state(1);
 let gameOverBest = $state(0);
+// Global leaderboard
+let leaderboard = $state<{ rank: number; name: string; score: number; level: number; time: number }[]>([]);
+let globalRank = $state<number | null>(null);
+let leaderboardLabel = $state<string>('');   // 'GLOBAL' or 'LOCAL' depending on online/offline
 let highScores = $state<{ name: string; score: number; level: number; time: number }[]>([]);
 // Mobile
 let isMobile = $state(false);
@@ -77,6 +81,11 @@ let minimapCanvas: HTMLCanvasElement;
         gameOverScore = s;
         gameOverLevel = lv;
         gameOverBest = best;
+      },
+      setLeaderboard: (entries: any[], rank: number | null) => {
+        leaderboard = entries || [];
+        globalRank = rank;
+        leaderboardLabel = rank ? 'GLOBAL' : 'LOCAL';
       },
     };
     (window as any).__hud = api;
@@ -479,12 +488,17 @@ let minimapCanvas: HTMLCanvasElement;
         <div class="gameover-stat"><span>LEVEL</span><strong>{gameOverLevel.toString().padStart(2, '0')}</strong></div>
         <div class="gameover-stat"><span>BEST</span><strong>{gameOverBest.toString().padStart(6, '0')}</strong></div>
       </div>
-      {#if highScores.length > 0}
+      {#if leaderboard.length > 0}
         <div class="high-scores">
-          <div class="hs-title">// HIGH SCORES //</div>
-          {#each highScores as entry, i}
-            <div class="hs-row">
-              <span class="hs-rank">#{i + 1}</span>
+          <div class="hs-title">
+            // {leaderboardLabel} TOP {Math.min(leaderboard.length, 10)} //
+            {#if globalRank !== null}
+              <span class="hs-your-rank">YOUR RANK: #{globalRank}</span>
+            {/if}
+          </div>
+          {#each leaderboard.slice(0, 10) as entry}
+            <div class="hs-row" class:hs-row-you={globalRank !== null && entry.rank === globalRank}>
+              <span class="hs-rank">#{entry.rank}</span>
               <span class="hs-name">{entry.name}</span>
               <span class="hs-score">{entry.score.toString().padStart(6, '0')}</span>
               <span class="hs-lv">L{entry.level.toString().padStart(2, '0')}</span>
@@ -923,6 +937,17 @@ let minimapCanvas: HTMLCanvasElement;
   .hs-rank { color: var(--magenta); }
   .hs-score { text-align: right; color: var(--orange); }
   .hs-lv, .hs-time { text-align: center; opacity: 0.8; }
+  .hs-row-you {
+    background: rgba(255, 106, 0, 0.18);
+    border: 1px solid var(--orange);
+    padding: 4px 6px;
+  }
+  .hs-your-rank {
+    color: var(--orange);
+    text-shadow: 0 0 6px var(--orange);
+    margin-left: 16px;
+    letter-spacing: 2px;
+  }
   .gameover-actions { display: flex; gap: 16px; }
   .gameover-btn {
     background: transparent;
