@@ -20,7 +20,7 @@ import { AudioBus } from './Audio';
 import { Component, generateComponents } from './Components';
 import { PALETTE } from './palette';
 import { Save, AchievementId, saveHighScores, saveRun, saveBestScore, saveFragments, loadSave, pushHighScore, ACHIEVEMENT_META } from './SaveSystem';
-import { submitScore, fetchTop, LeaderboardEntry } from './Leaderboard';
+import { submitScore, fetchTop, LeaderboardEntry, Period, Avatar, AVATARS } from './Leaderboard';
 
 // Re-seed Math.random with a tiny mulberry32 PRNG so the procedural world
 // generates a DIFFERENT layout per level. Called from startNextLevel().
@@ -56,6 +56,8 @@ type HudHandle = {
   setAchievements: (ids: AchievementId[]) => void;
   setGameOverScore: (score: number, level: number, bestScore: number) => void;
   setLeaderboard: (entries: any[], globalRank: number | null) => void;
+  setTop3: (entries: any[]) => void;
+  setLeaderboardPage: (v: boolean) => void;
   askForName: (defaultName: string) => void;
   submitWithName: (name: string) => void;
   skipName: () => void;
@@ -123,6 +125,8 @@ export class Game {
   // Global leaderboard (top-10, fetched lazily on game-over)
   private leaderboard: LeaderboardEntry[] = [];
   private globalRank: number | null = null;
+  // Last fetched top-3 (refreshed every game-over)
+  private top3Cache: LeaderboardEntry[] = [];
 
   // AABB for gate proximity
   private nearLore: string | null = null;
@@ -240,6 +244,21 @@ export class Game {
     saveRun(this.save.run);
   }
 
+  /** Open the leaderboard page with the requested period. */
+  async openLeaderboardPage(period: 'all' | 'daily' | 'weekly' = 'all') {
+    this.hud.setLeaderboardPage(true);
+    const top = await fetchTop(20, period);
+    this.hud.setLeaderboard(top, null);
+  }
+
+  /** Public: change the player's avatar (persisted in the run save). */
+  setAvatar(avatar: string) {
+    if (AVATARS.indexOf(avatar as any) >= 0) {
+      this.save.run.avatar = avatar as Avatar;
+      saveRun(this.save.run);
+    }
+  }
+
   /** Open the shop overlay (called after the level cinematic). */
   openShop() {
     this.hud.setShop(true);
@@ -329,12 +348,15 @@ export class Game {
     saveBestScore(newBest);
 
     const totalTime = (performance.now() - this.runStartTime) / 1000;
-    const entry = {
+    const entry: any = {
       name: finalName,
       score: this.score,
       level: this.level,
       time: totalTime,
       when: Date.now(),
+      heroName: finalName,
+      avatar: this.save.run.avatar || 'code',
+      country: '??',   // would come from a real geoip in production
     };
     this.save.highScores = pushHighScore(this.save.highScores, entry);
     saveHighScores(this.save.highScores);
@@ -348,6 +370,7 @@ export class Game {
       const me = top.find((e) => e.name === finalName && e.score === this.score);
       this.globalRank = me ? me.rank : null;
       this.hud.setLeaderboard(top, this.globalRank);
+      this.hud.setTop3(top);  // update top-3 widget too
     }).catch(() => { /* ignored */ });
   }
 

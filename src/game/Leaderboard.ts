@@ -4,6 +4,9 @@
  *  - Falls back to localStorage (top-5) if the network is unavailable
  *  - Otherwise calls the Cloudflare Pages Function at /api/scores
  *  - On game-over, POSTs the new score and re-fetches the top-10
+ *  - Supports period filters: all (default), daily, weekly
+ *  - Sends a signed payload (HMAC-SHA256) if a secret was bundled
+ *  - Avatar + country are attached when available
  *
  * The backend is a Cloudflare Pages Function backed by a D1 database
  * (see `functions/api/scores.ts` and `schema.sql`).
@@ -15,13 +18,40 @@ const LS_KEY = 'neongrid:leaderboard-cache';
 const CACHE_TTL = 60_000;     // 60s
 const TIMEOUT_MS = 5_000;
 
-export type LeaderboardEntry = HighScore & {
+export type Avatar = 'code' | 'glitch' | 'shard' | 'circuit' | 'kernel';
+export const AVATARS: Avatar[] = ['code', 'glitch', 'shard', 'circuit', 'kernel'];
+
+export type Period = 'all' | 'daily' | 'weekly';
+
+export type LeaderboardEntry = {
   rank: number;
+  name: string;
+  score: number;
+  level: number;
+  time: number;       // seconds
+  when: number;       // epoch ms
+  avatar?: Avatar;
+  country?: string;
+  heroName?: string;
 };
 
-function localFallback(): LeaderboardEntry[] {
+export type SubmitEntry = {
+  name: string;
+  score: number;
+  level: number;
+  time: number;
+  when?: number;
+  heroName?: string;
+  avatar?: Avatar;
+  country?: string;
+  sign?: string;
+};
+
+const SIGN_KEY = 'neongrid:score-sign-v1';   // local demo key (server uses SCORE_SECRET)
+
+function localFallback(period: Period): LeaderboardEntry[] {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(LS_KEY + ':' + period);
     if (!raw) return [];
     const arr = JSON.parse(raw) as LeaderboardEntry[];
     if (!Array.isArray(arr)) return [];
@@ -31,24 +61,20 @@ function localFallback(): LeaderboardEntry[] {
   }
 }
 
-function writeCache(scores: LeaderboardEntry[]) {
+function writeCache(period: Period, scores: LeaderboardEntry[]) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(scores));
+    localStorage.setItem(LS_KEY + ':' + period, JSON.stringify(scores));
+    localStorage.setItem(LS_KEY + ':' + period + ':at', Date.now().toString());
   } catch {}
 }
 
-function readCache(): { at: number; scores: LeaderboardEntry[] } {
+function readCache(period: Period): { at: number; scores: LeaderboardEntry[] } {
   try {
-    const raw = localStorage.getItem(LS_KEY + ':at');
-    const arr = localFallback();
-    return { at: raw ? parseInt(raw, 10) : 0, scores: arr };
+    const at = parseInt(localStorage.getItem(LS_KEY + ':' + period + ':at') || '0', 10);
+    return { at, scores: localFallback(period) };
   } catch {
     return { at: 0, scores: [] };
   }
-}
-
-function writeCacheAt(at: number) {
-  try { localStorage.setItem(LS_KEY + ':at', at.toString()); } catch {}
 }
 
 function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T> {
@@ -59,42 +85,80 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T> {
   });
 }
 
-export async function fetchTop(scores = 10): Promise<LeaderboardEntry[]> {
-  const { at, scores: cached } = readCache();
+async function sha256Hex(input: string): Promise<string> {
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(input));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function asyncHmacHex(secret: string, payload: string): Promise<string> {
+  const enc = new TextEncoder();
+  const keyMat = await crypto.subtle.importKey(
+    'raw', enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', keyMat, enc.encode(payload));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Sign a payload with the bundled local key. The server will
+ *  re-sign and compare (or skip if SCORE_SECRET is not set, in which
+ *  case the signature is informational only). */
+export async function signPayload(entry: SubmitEntry): Promise<string | undefined> {
+  try {
+    const { sign, ...rest } = entry;
+    return await asyncHmacHex(SIGN_KEY, JSON.stringify(rest));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Hash a string (used for cache keys, country flags, etc). */
+export async function shortHash(s: string): Promise<string> {
+  return (await sha256Hex(s)).slice(0, 8);
+}
+
+export async function fetchTop(scores = 10, period: Period = 'all'): Promise<LeaderboardEntry[]> {
+  const { at, scores: cached } = readCache(period);
   if (Date.now() - at < CACHE_TTL && cached.length > 0) return cached;
 
   try {
     const res = await withTimeout(
-      fetch(`/api/scores?limit=${scores}`),
+      fetch(`/api/scores?limit=${scores}&period=${period}`),
       TIMEOUT_MS,
     );
     if (!res.ok) throw new Error('http ' + res.status);
-    const data = (await res.json()) as LeaderboardEntry[];
-    writeCache(data);
-    writeCacheAt(Date.now());
-    return data;
+    const data = (await res.json()) as { scores: LeaderboardEntry[]; period: Period };
+    writeCache(period, data.scores || []);
+    return data.scores || [];
   } catch {
-    // Offline / API not yet deployed: serve stale cache
     return cached;
   }
 }
 
-export async function submitScore(entry: Omit<HighScore, 'when'>): Promise<LeaderboardEntry[]> {
-  const body = { ...entry, when: Date.now() };
+export async function submitScore(entry: SubmitEntry): Promise<LeaderboardEntry[]> {
+  // Add avatar + country if missing
+  if (!entry.avatar) entry.avatar = 'code';
+  if (!entry.country) entry.country = '??';
+  // Sign payload (server will verify or skip)
+  if (!entry.sign) {
+    const sig = await signPayload(entry);
+    if (sig) entry.sign = sig;
+  }
+
   try {
     const res = await withTimeout(
       fetch('/api/scores', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(entry),
       }),
       TIMEOUT_MS,
     );
     if (!res.ok) throw new Error('http ' + res.status);
-    const data = (await res.json()) as LeaderboardEntry[];
-    writeCache(data);
-    writeCacheAt(Date.now());
-    return data;
+    const data = (await res.json()) as { scores: LeaderboardEntry[] };
+    writeCache('all', data.scores || []);
+    return data.scores || [];
   } catch {
     // Network failed: still merge with the local cache so the
     // local top-5 stays useful even when offline.
@@ -106,11 +170,11 @@ export async function submitScore(entry: Omit<HighScore, 'when'>): Promise<Leade
         return list.map((e, i) => ({ ...e, rank: i + 1 }));
       } catch { return []; }
     })();
-    const merged = [...local, { ...body, when: body.when ?? Date.now() }]
+    const merged: LeaderboardEntry[] = [...local, { ...entry, when: entry.when || Date.now() }]
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
       .map((e, i) => ({ ...e, rank: i + 1 }));
-    writeCache(merged);
+    writeCache('all', merged);
     return merged;
   }
 }

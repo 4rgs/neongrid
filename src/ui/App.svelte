@@ -35,10 +35,17 @@ let gameOverBest = $state(0);
 let askForName = $state(false);
 let pendingName = $state('PROGRAMMER');
 // Global leaderboard
-let leaderboard = $state<{ rank: number; name: string; score: number; level: number; time: number }[]>([]);
+let leaderboard = $state<{ rank: number; name: string; score: number; level: number; time: number; avatar?: string; country?: string }[]>([]);
 let globalRank = $state<number | null>(null);
 let leaderboardLabel = $state<string>('');   // 'GLOBAL' or 'LOCAL' depending on online/offline
 let highScores = $state<{ name: string; score: number; level: number; time: number }[]>([]);
+// Top-3 widget
+let top3 = $state<{ rank: number; name: string; score: number; avatar?: string; country?: string }[]>([]);
+// Leaderboard page (full overlay)
+let showLeaderboardPage = $state(false);
+let lbPeriod = $state<'all' | 'daily' | 'weekly'>('all');
+let lbLoading = $state(false);
+let selectedAvatar = $state<string>('code');
 // Mobile
 let isMobile = $state(false);
 // Minimap state
@@ -90,6 +97,12 @@ let minimapCanvas: HTMLCanvasElement;
         globalRank = rank;
         leaderboardLabel = rank ? 'GLOBAL' : 'LOCAL';
       },
+      setTop3: (entries: any[]) => {
+        top3 = (entries || []).slice(0, 3);
+      },
+      setLeaderboardPage: (v: boolean) => {
+        showLeaderboardPage = v;
+      },
       askForName: (defaultName: string) => {
         pendingName = defaultName || 'PROGRAMMER';
         askForName = true;
@@ -107,10 +120,14 @@ let minimapCanvas: HTMLCanvasElement;
     return () => { /* keep global on unmount */ };
   });
 
-  // Toggle settings with M key
+  // Toggle settings with M key, leaderboard with L key
   function handleKeydown(e: KeyboardEvent) {
     if (e.code === 'KeyM' && !(window as any).__game?.gameOver) {
       showSettings = !showSettings;
+    }
+    if (e.code === 'KeyL' && !(window as any).__game?.gameOver) {
+      showLeaderboardPage = !showLeaderboardPage;
+      if (showLeaderboardPage) (window as any).__game?.openLeaderboardPage?.(lbPeriod);
     }
   }
   $effect(() => {
@@ -298,8 +315,23 @@ let minimapCanvas: HTMLCanvasElement;
         <div class="hud-best">BEST {bestScore.toString().padStart(6, '0')}</div>
       {/if}
       <button class="hud-settings-btn" onclick={() => showSettings = !showSettings} title="Settings (M)">⚙</button>
+      <button class="hud-lb-btn" onclick={() => (window as any).__hud?.setLeaderboardPage(true)} title="Leaderboard (L)">★</button>
     </div>
   </div>
+
+  {#if top3.length > 0 && !gameOver && !showShop && !showTransition}
+    <div class="top3-widget">
+      <div class="top3-title">// TOP 3 //</div>
+      {#each top3 as entry}
+        <div class="top3-row">
+          <span class="top3-rank">#{entry.rank}</span>
+          <span class="top3-avatar avatar-{entry.avatar || 'code'}"></span>
+          <span class="top3-name">{entry.name}</span>
+          <span class="top3-score">{entry.score.toString().padStart(6, '0')}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <div class="hud-bottom-left">
     <div class="hud-label">HEALTH</div>
@@ -326,6 +358,48 @@ let minimapCanvas: HTMLCanvasElement;
 
   {#if lore}
     <div class="hud-lore">{lore}</div>
+  {/if}
+
+  {#if showLeaderboardPage}
+    <div class="lb-overlay" onclick={() => showLeaderboardPage = false} role="presentation">
+      <div class="lb-card" onclick={(e) => e.stopPropagation()} role="presentation">
+        <div class="lb-title">// GLOBAL LEADERBOARD //</div>
+        <div class="lb-period">
+          <button class="lb-period-btn" class:active={lbPeriod === 'all'}    onclick={() => { lbPeriod = 'all';    (window as any).__game?.openLeaderboardPage('all'); }}>ALL TIME</button>
+          <button class="lb-period-btn" class:active={lbPeriod === 'daily'}  onclick={() => { lbPeriod = 'daily';  (window as any).__game?.openLeaderboardPage('daily'); }}>TODAY</button>
+          <button class="lb-period-btn" class:active={lbPeriod === 'weekly'} onclick={() => { lbPeriod = 'weekly'; (window as any).__game?.openLeaderboardPage('weekly'); }}>THIS WEEK</button>
+        </div>
+        <div class="lb-avatar-pick">
+          <span class="lb-avatar-label">YOUR AVATAR</span>
+          {#each ['code', 'glitch', 'shard', 'circuit', 'kernel'] as a}
+            <button class="lb-avatar-btn avatar-{a}" class:active={selectedAvatar === a}
+              onclick={() => { selectedAvatar = a; (window as any).__game?.setAvatar(a); }}
+              title={a}></button>
+          {/each}
+        </div>
+        {#if leaderboard.length > 0}
+          <div class="lb-list">
+            {#each leaderboard.slice(0, 20) as entry}
+              <div class="lb-row" class:lb-row-you={globalRank !== null && entry.rank === globalRank}>
+                <span class="lb-rank">#{entry.rank}</span>
+                <span class="lb-avatar-mini avatar-{entry.avatar || 'code'}"></span>
+                <span class="lb-name">{entry.name}</span>
+                <span class="lb-score">{entry.score.toString().padStart(7, '0')}</span>
+                <span class="lb-lv">L{entry.level.toString().padStart(2, '0')}</span>
+                <span class="lb-time">{formatTimeShort(entry.time)}</span>
+                <span class="lb-country">{entry.country || '??'}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="lb-empty">// no scores in this period //</div>
+        {/if}
+        <div class="lb-actions">
+          <button class="lb-btn" onclick={() => showLeaderboardPage = false}>CLOSE</button>
+        </div>
+        <div class="lb-hint">press L to toggle · period refreshes on game-over</div>
+      </div>
+    </div>
   {/if}
 
   {#if askForName}
@@ -608,6 +682,188 @@ let minimapCanvas: HTMLCanvasElement;
     color: black;
     text-shadow: none;
   }
+  .hud-lb-btn {
+    background: rgba(255, 106, 0, 0.12);
+    border: 1px solid var(--orange);
+    color: var(--orange);
+    width: 28px;
+    height: 28px;
+    margin-top: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    text-shadow: 0 0 6px var(--orange);
+    transition: all 0.2s ease;
+  }
+  .hud-lb-btn:hover { background: var(--orange); color: black; text-shadow: none; }
+
+  /* ─── Top-3 widget ─────────────────────────────────────────────────── */
+  .top3-widget {
+    position: absolute;
+    left: 220px;
+    top: 192px;
+    min-width: 220px;
+    padding: 8px 12px;
+    background: rgba(0, 20, 30, 0.4);
+    border: 1px solid rgba(0, 240, 255, 0.3);
+    backdrop-filter: blur(2px);
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+  .top3-title {
+    color: var(--cyan);
+    text-shadow: 0 0 6px var(--cyan);
+    margin-bottom: 6px;
+  }
+  .top3-row {
+    display: grid;
+    grid-template-columns: 24px 18px 1fr 60px;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+  }
+  .top3-rank { color: var(--magenta); }
+  .top3-name { color: var(--cyan); overflow: hidden; text-overflow: ellipsis; }
+  .top3-score { color: var(--orange); text-align: right; text-shadow: 0 0 6px var(--orange); }
+  /* Avatars (small) — CSS-only mini-icons */
+  .top3-avatar, .lb-avatar-mini, .lb-avatar-btn {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 1px solid currentColor;
+    background-size: cover;
+    image-rendering: pixelated;
+  }
+  .lb-avatar-btn {
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    background: transparent;
+    transition: all 0.2s ease;
+  }
+  .lb-avatar-btn.active { border-width: 2px; box-shadow: 0 0 12px currentColor; transform: scale(1.1); }
+  /* Avatar variants: pure CSS sprites */
+  .avatar-code {
+    background: linear-gradient(135deg, #00f0ff 0%, #00f0ff 50%, #000 50%, #000 100%);
+  }
+  .avatar-glitch {
+    background:
+      linear-gradient(0deg, transparent 48%, #ff00aa 48%, #ff00aa 52%, transparent 52%),
+      linear-gradient(90deg, transparent 48%, #ff6a00 48%, #ff6a00 52%, transparent 52%),
+      #000;
+  }
+  .avatar-shard {
+    background: conic-gradient(from 45deg, #00f0ff, #ff00aa, #ff6a00, #00ff88, #00f0ff);
+  }
+  .avatar-circuit {
+    background:
+      linear-gradient(0deg, transparent 40%, #00f0ff 40%, #00f0ff 60%, transparent 60%),
+      linear-gradient(90deg, transparent 40%, #00f0ff 40%, #00f0ff 60%, transparent 60%),
+      #000;
+    border: 1px solid #00f0ff;
+  }
+  .avatar-kernel {
+    background: radial-gradient(circle, #ff00aa 30%, transparent 30%),
+                radial-gradient(circle, #00f0ff 60%, transparent 60%),
+                #000;
+  }
+
+  /* ─── Leaderboard page overlay ─────────────────────────────────────── */
+  .lb-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    z-index: 30;
+    animation: fade-in 0.3s ease;
+  }
+  .lb-card {
+    border: 1px solid var(--cyan);
+    background: rgba(0, 20, 30, 0.95);
+    padding: 22px 28px;
+    box-shadow: 0 0 32px var(--cyan);
+    min-width: 580px;
+    max-width: 720px;
+    max-height: 84vh;
+    overflow-y: auto;
+  }
+  .lb-title {
+    font-size: 22px;
+    color: var(--cyan);
+    text-shadow: 0 0 12px var(--cyan);
+    letter-spacing: 6px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  .lb-period { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
+  .lb-period-btn {
+    background: transparent;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 6px 14px;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 3px;
+    cursor: pointer;
+  }
+  .lb-period-btn:hover { background: rgba(0, 240, 255, 0.18); }
+  .lb-period-btn.active {
+    background: var(--cyan);
+    color: black;
+    text-shadow: none;
+  }
+  .lb-avatar-pick {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(255, 106, 0, 0.3);
+    margin-bottom: 12px;
+    justify-content: center;
+  }
+  .lb-avatar-label {
+    color: var(--orange);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-shadow: 0 0 6px var(--orange);
+  }
+  .lb-list { margin-bottom: 12px; }
+  .lb-row {
+    display: grid;
+    grid-template-columns: 32px 18px 1fr 80px 36px 56px 32px;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .lb-row-you {
+    background: rgba(255, 106, 0, 0.18);
+    border: 1px solid var(--orange);
+    padding: 3px 6px;
+  }
+  .lb-rank { color: var(--magenta); }
+  .lb-name { color: var(--cyan); overflow: hidden; text-overflow: ellipsis; }
+  .lb-score { color: var(--orange); text-align: right; text-shadow: 0 0 6px var(--orange); }
+  .lb-lv, .lb-time { color: rgba(0, 240, 255, 0.7); text-align: center; }
+  .lb-country { color: var(--green); text-align: center; opacity: 0.7; }
+  .lb-empty { text-align: center; color: rgba(0, 240, 255, 0.5); padding: 40px 0; }
+  .lb-actions { text-align: center; margin-top: 12px; }
+  .lb-btn {
+    background: transparent;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 8px 30px;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 4px;
+    cursor: pointer;
+  }
+  .lb-btn:hover { background: var(--cyan); color: black; }
+  .lb-hint { text-align: center; font-size: 9px; color: rgba(0, 240, 255, 0.5); margin-top: 8px; }
   .hud-value.small {
     font-size: 12px;
     opacity: 0.8;

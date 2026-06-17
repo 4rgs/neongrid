@@ -24,6 +24,9 @@ export type Upgrades = {
   speedMul: number;       // 1.0, 1.1, 1.2, 1.3, 1.4
 };
 
+export type Avatar = 'code' | 'glitch' | 'shard' | 'circuit' | 'kernel';
+export const DEFAULT_AVATAR: Avatar = 'code';
+
 export type AchievementId =
   | 'first_blood'      // kill first enemy
   | 'frag_collector'   // collect first fragment
@@ -44,6 +47,7 @@ export type Save = {
     upgrades: Upgrades;
     achievements: AchievementId[];
     heroName: string;
+    avatar: Avatar;
   };
   settings: {
     volume: number;
@@ -76,6 +80,7 @@ export const DEFAULT_SAVE: Save = {
     upgrades: { ...DEFAULT_UPGRADES },
     achievements: [],
     heroName: 'PROGRAMMER',
+    avatar: DEFAULT_AVATAR,
   },
   settings: { volume: 0.7 },
   fragments: [],
