@@ -19,7 +19,7 @@ import { CameraController } from './CameraController';
 import { AudioBus } from './Audio';
 import { Component, generateComponents } from './Components';
 import { PALETTE } from './palette';
-import { Save, AchievementId, saveHighScores, saveRun, saveBestScore, saveFragments, loadSave, pushHighScore, ACHIEVEMENT_META } from './SaveSystem';
+import { Save, AchievementId, saveHighScores, saveRun, saveBestScore, saveFragments, loadSave, pushHighScore, ACHIEVEMENT_META, DEFAULT_UPGRADES } from './SaveSystem';
 import { submitScore, fetchTop, fetchProfile, LeaderboardEntry, ProfileEntry, Period, Avatar, AVATARS } from './Leaderboard';
 import { ReplayRecorder, uploadReplay, Replay } from './ReplayRecorder';
 
@@ -426,6 +426,78 @@ export class Game {
       });
     }
     this.replay.clear();
+
+    // Auto-restart the run 3s after the player confirms their name.
+    // The user wanted the level to restart on its own after the
+    // "identify yourself" screen, so they don't have to click PLAY
+    // AGAIN manually. The bestScore persists in localStorage and is
+    // shown in the HUD on the new run.
+    this.hud.setLore('// restart in 3 seconds //');
+    setTimeout(() => {
+      if (this.gameOver) this.restartRun();
+    }, 3000);
+  }
+
+  /**
+   * Reset the run to level 1 with default upgrades, full HP, and a
+   * fresh score. Best score + achievements persist (they survive
+   * across runs and are shown in the HUD / leaderboard).
+   */
+  restartRun() {
+    // Clear the game-over UI
+    this.gameOver = false;
+    this.hud.setGameOver(false);
+    this.hud.setShop(false);
+    this.shopOpen = false;
+    this.audio.ambientStart();
+
+    // Reset run upgrades (the player keeps their best score & avatar)
+    this.save.run.upgrades = { ...DEFAULT_UPGRADES };
+    this.save.run.currentLevel = 1;
+    this.save.run.achievements = [];
+    saveRun(this.save.run);
+
+    // Hero stats
+    this.hero.maxHp = DEFAULT_UPGRADES.maxHp;
+    this.hero.hp = this.hero.maxHp;
+    this.hero.dashCdMul = DEFAULT_UPGRADES.dashCdMul;
+    this.hero.attackCdMul = DEFAULT_UPGRADES.attackSpeedMul;
+    this.hero.speedMul = DEFAULT_UPGRADES.speedMul;
+    this.hero.group.position.set(0, 0, 0);
+
+    // HUD
+    this.hud.setHp(this.hero.hp, this.hero.maxHp);
+    this.hud.setScore(0);
+    this.hud.setBossHp(0, 0);
+    this.hud.setFragments(0, this.fragmentsTotal);
+
+    // Reset level + regenerate world
+    this.level = 1;
+    this.score = 0;
+    this.damageThisLevel = 0;
+    this.enemiesKilledThisLevel = 0;
+    this.fragmentsCollected = 0;
+    this.bossSpawned = false;
+    this.bossDefeated = false;
+    this.boss = null;
+    for (const f of this.fragments) { f.collected = false; f.group.visible = true; }
+    for (const c of this.components) this.scene.remove(c.group);
+    seedRandom(this.level * 9173 + 42);
+    this.components = generateComponents();
+    for (const c of this.components) this.scene.add(c.group);
+    this.levelStartTime = performance.now();
+    this.runStartTime = performance.now();
+
+    // Cinematic reveal of the new level
+    this.hud.setLore(`// LEVEL ${this.level} // the grid has reconfigured. stay sharp.`);
+    this.cine.play([
+      { focus: new THREE.Vector3(0, 0, -45), yaw: Math.PI, pitch: 0.45, distance: 22, t: 0 },
+      { focus: new THREE.Vector3(0, 0, 0), yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 1.4 },
+    ]);
+
+    // Restart the replay recorder for the new run
+    this.replay.clear();
+    this.replayStartedAt = performance.now();
   }
 
   /** Respawn at the same level the player died on. */

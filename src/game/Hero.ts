@@ -198,6 +198,21 @@ export class Hero {
     return null;
   }
 
+  /**
+   * Find the component whose footprint overlaps (x, z) and return the
+   * first one we encounter. The caller decides whether the hero is
+   * actually standing on top of it by comparing the hero's y to the
+   * top of the component (group.position.y + height).
+   */
+  private topCollider(components: Component[], x: number, z: number, r: number): Component | null {
+    for (const c of components) {
+      const dx = Math.abs(x - c.group.position.x);
+      const dz = Math.abs(z - c.group.position.z);
+      if (dx < c.halfX + r && dz < c.halfZ + r) return c;
+    }
+    return null;
+  }
+
   update(dt: number, input: Input, t: number, pulse: number, cameraYaw: number, components: Component[] = []) {
     if (this.attackCd > 0) this.attackCd = Math.max(0, this.attackCd - dt);
     if (this.dashT > 0) this.dashT = Math.max(0, this.dashT - dt);
@@ -269,9 +284,21 @@ export class Hero {
     this.group.position.x = finalX;
     this.group.position.z = finalZ;
     this.group.position.y += this.vy * dt;
+    // Ground is the higher of: (a) the terrain under our feet, or
+    // (b) the top of any component we're standing on (climbing).
     const groundY = terrainHeight(this.group.position.x, this.group.position.z) + 0.02;
-    if (this.group.position.y <= groundY) {
-      this.group.position.y = groundY;
+    let standOnY = groundY;
+    let standOnComponent: Component | null = null;
+    const topCheck = this.topCollider(components, this.group.position.x, this.group.position.z, 0.45);
+    if (topCheck) {
+      const top = topCheck.group.position.y + topCheck.height;
+      if (this.group.position.y >= top - 0.5 && this.vy <= 0) {
+        standOnY = top + 0.02;
+        standOnComponent = topCheck;
+      }
+    }
+    if (this.group.position.y <= standOnY) {
+      this.group.position.y = standOnY;
       this.vy = 0;
       this.onGround = true;
     }
