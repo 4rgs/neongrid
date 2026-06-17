@@ -52,6 +52,9 @@ let top3 = $state<{ rank: number; name: string; score: number; avatar?: string; 
   let profileName = $state<string>('');
   let profile = $state<any>(null);
   let profileLoading = $state(false);
+  // Flash overlay (white or red), used by setFlash
+  let flashColor = $state<string | null>(null);
+  let flashDuration = $state(0);
 // Mobile
 let isMobile = $state(false);
 // Minimap state
@@ -83,6 +86,13 @@ let minimapCanvas: HTMLCanvasElement;
       setTransition: (v: boolean, label?: string) => {
         showTransition = v;
         transitionLabel = label ?? '';
+      },
+      setFlash: (color: 'white' | 'red', duration = 0.9) => {
+        flashColor = color;
+        flashDuration = duration;
+        setTimeout(() => {
+          if (flashColor === color) { flashColor = null; }
+        }, duration * 1000);
       },
       setShop: (v: boolean) => { showShop = v; shopScore = (window as any).__game?.score ?? 0; },
       setAchievements: (ids: string[]) => {
@@ -508,6 +518,10 @@ let minimapCanvas: HTMLCanvasElement;
       <div class="transition-label">{transitionLabel}</div>
       <div class="transition-sub">// reinitializing grid //</div>
     </div>
+  {/if}
+
+  {#if flashColor}
+    <div class="flash-overlay flash-{flashColor}"></div>
   {/if}
 
   {#if showShop}
@@ -1361,6 +1375,34 @@ let minimapCanvas: HTMLCanvasElement;
     color: var(--cyan);
     opacity: 0.7;
     letter-spacing: 4px;
+  }
+  .flash-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    animation: flash-fade ease-out forwards;
+    animation-duration: inherit;
+  }
+  .flash-white {
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: inset 0 0 120px rgba(255, 255, 255, 0.9);
+    animation-name: flash-fade-white;
+  }
+  .flash-red {
+    background: rgba(255, 34, 85, 0.7);
+    box-shadow: inset 0 0 80px rgba(255, 34, 85, 0.8);
+    animation-name: flash-fade-red;
+  }
+  @keyframes flash-fade-white {
+    0%   { opacity: 0.95; }
+    20%  { opacity: 0.85; }
+    100% { opacity: 0; }
+  }
+  @keyframes flash-fade-red {
+    0%   { opacity: 0.9; }
+    30%  { opacity: 0.6; }
+    100% { opacity: 0; }
   }
   .shop-overlay {
     position: absolute;

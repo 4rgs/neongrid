@@ -53,6 +53,7 @@ type HudHandle = {
   getVolume: () => number;
   setLevel: (n: number) => void;
   setTransition: (v: boolean, label?: string) => void;
+  setFlash: (color: 'white' | 'red', duration?: number) => void;
   setShop: (v: boolean) => void;
   setAchievements: (ids: AchievementId[]) => void;
   setGameOverScore: (score: number, level: number, bestScore: number) => void;
@@ -349,14 +350,20 @@ export class Game {
     this.audio.hurt();
     this.shake(0.5, 0.6);
 
+    // Red flash overlay (signals "you're dead" before the name modal)
+    this.hud.setFlash('red', 0.7);
+
+    // Persist the level reached.
+    this.save.run.currentLevel = this.level;
+    saveRun(this.save.run);
+
     // Show the name-entry modal with the last-used name as default.
     // The user can confirm (Enter) or skip; either path lands on
     // submitWithName() which validates and POSTs to the leaderboard.
-    this.hud.askForName(this.save.run.heroName);
-
-    // Persist the run state regardless of the name (upgrades, level).
-    this.save.run.currentLevel = this.level;
-    saveRun(this.save.run);
+    // Delay the modal slightly so the player has time to register the
+    // death (red flash + shake + ambient drop) before being asked
+    // for their handle.
+    setTimeout(() => this.hud.askForName(this.save.run.heroName), 700);
   }
 
   /** Called by the HUD once the player has entered a name (or skipped).
@@ -710,9 +717,10 @@ export class Game {
       }
     }
 
-    // Boss spawn: when all fragments are collected and boss not yet spawned
+    // Boss spawn: when all fragments are collected and boss not yet spawned.
+    // Sequence: flash + shake + lore + cinematic reveal.
     if (!this.bossSpawned && this.fragmentsCollected >= this.fragmentsTotal && this.fragmentsTotal > 0) {
-      this.spawnBoss();
+      this.finalizeFragmentRun();
     }
 
     // Difficulty wave 1: at 30% progress, spawn 2 drones + 1 charger
@@ -829,20 +837,42 @@ export class Game {
     this.shakeT = Math.max(this.shakeT, t);
   }
 
+  /** Triggered when the player collects the last fragment. Plays
+   *  the "finalization" sequence: white flash, screen shake, lore
+   *  banner, warning audio, particle burst, then 1.6s later the
+   *  boss spawns with an extended cinematic reveal. */
+  private finalizeFragmentRun() {
+    if (this.bossSpawned) return;
+    this.bossSpawned = true;   // claim immediately so we don't double-spawn
+    this.hud.setLore('// ALL FRAGMENTS COLLECTED // the master process awakens');
+    this.hud.setFragments(this.fragmentsCollected, this.fragmentsTotal);
+    this.shake(0.6, 1.0);
+    // White-flash overlay (HUD side)
+    this.hud.setFlash('white', 0.9);
+    // Particle burst at hero position (cyan, large)
+    this.particles.burst(this.hero.group.position.clone().setY(1.5), PALETTE.cyan, 120, 8, 1.2);
+    // Audio: warning + chord
+    this.audio.warning();
+    // Spawn the boss 1.6s later so the player has time to see the flash
+    setTimeout(() => this.spawnBoss(), 1600);
+  }
+
   private spawnBoss() {
-    this.bossSpawned = true;
     // Variant: octa (default), spinblade (faster ring), voidtank (slower tank)
     this.boss = new Boss(new THREE.Vector3(0, 0, -90), this.level, this.bossVariant);
     this.scene.add(this.boss.group);
     this.hud.setBossHp(this.boss.hp, this.boss.maxHp);
     this.audio.warning();
-    // Cinematic: pull camera back to reveal the boss
+    // Cinematic: pull camera back to reveal the boss.
+    // The cinematic lasts 5s (longer than before) so the player
+    // has time to register the reveal before the fight starts.
     const hp = this.hero.group.position.clone();
     this.cine.play([
-      { focus: hp, yaw: this.camCtl.yaw, pitch: 0.35, distance: 24, t: 0 },
-      { focus: hp, yaw: this.camCtl.yaw, pitch: 0.6, distance: 30, t: 1.0 },
-      { focus: new THREE.Vector3(0, 0, -85), yaw: Math.PI, pitch: 0.45, distance: 22, t: 2.4 },
-      { focus: this.hero.group.position.clone(), yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 3.6 },
+      { focus: hp,                  yaw: this.camCtl.yaw, pitch: 0.35, distance: 24, t: 0    },
+      { focus: hp,                  yaw: this.camCtl.yaw, pitch: 0.55, distance: 28, t: 1.2  },
+      { focus: new THREE.Vector3(0, 0, -85), yaw: Math.PI,      pitch: 0.50, distance: 26, t: 2.6  },
+      { focus: new THREE.Vector3(0, 0, -85), yaw: Math.PI,      pitch: 0.45, distance: 22, t: 3.8  },
+      { focus: this.hero.group.position.clone(), yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 5.0  },
     ]);
   }
 
