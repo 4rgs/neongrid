@@ -253,12 +253,18 @@ export class Hero {
     this.velocity.x = vel.x * speed;
     this.velocity.z = vel.z * speed;
 
-    // Jump physics (relative to terrain)
+    // Jump physics. Tuned so the hero can reach the top of medium
+    // components (chips, caps, resistors, diodes, mega-IC ~2m tall)
+    // and "step" up the smaller electrolytic towers (3-5m) by chaining
+    // jumps. The really tall towers (9-14m, used as boss arenas)
+    // remain unreachable on purpose — they're meant as scenery +
+    // cover, not as climbable platforms.
+    // max height = vy^2 / (2*g) = 11^2 / (2*22) = 2.75m
     if (wantJump && this.onGround) {
-      this.vy = 9.5;
+      this.vy = 11;
       this.onGround = false;
     }
-    this.vy -= 26 * dt;
+    this.vy -= 22 * dt;
     // AABB sliding collision
     const heroRadius = 0.45;
     const newX = this.group.position.x + this.velocity.x * dt;
