@@ -22,6 +22,7 @@ export class Boss {
   hp = 30;
   maxHp = 30;
   level = 1;
+  variant = 'octa';
   // private AI state
   private t = 0;
   private angle = 0;
@@ -40,8 +41,9 @@ export class Boss {
   // projectiles
   projectiles: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number; damage: number }[] = [];
 
-  constructor(spawnAt: THREE.Vector3, level = 1) {
+  constructor(spawnAt: THREE.Vector3, level = 1, variant = 'octa') {
     this.level = level;
+    this.variant = variant;
     this.hp = 30 + 20 * (level - 1);
     this.maxHp = this.hp;
     this.buildMesh();

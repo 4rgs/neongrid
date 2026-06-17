@@ -20,6 +20,20 @@ let volume = $state(0.7);
 let level = $state(1);
 let showTransition = $state(false);
 let transitionLabel = $state('');
+// Shop
+let showShop = $state(false);
+let shopScore = $state(0);
+// Achievements
+let achievements = $state<string[]>([]);
+let justUnlocked = $state<string | null>(null);
+let justUnlockedName = $state('');
+// Game over data
+let gameOverScore = $state(0);
+let gameOverLevel = $state(1);
+let gameOverBest = $state(0);
+let highScores = $state<{ name: string; score: number; level: number; time: number }[]>([]);
+// Mobile
+let isMobile = $state(false);
 // Minimap state
 let minimapData = $state<{ x: number; y: number; yaw: number } | null>(null);
 // Subscribe via raf polling
@@ -50,6 +64,20 @@ let minimapCanvas: HTMLCanvasElement;
         showTransition = v;
         transitionLabel = label ?? '';
       },
+      setShop: (v: boolean) => { showShop = v; shopScore = (window as any).__game?.score ?? 0; },
+      setAchievements: (ids: string[]) => {
+        // Show the latest newly unlocked
+        const fresh = ids.filter(id => !achievements.includes(id));
+        if (fresh.length > 0) {
+          justUnlocked = fresh[fresh.length - 1];
+        }
+        achievements = ids;
+      },
+      setGameOverScore: (s: number, lv: number, best: number) => {
+        gameOverScore = s;
+        gameOverLevel = lv;
+        gameOverBest = best;
+      },
     };
     (window as any).__hud = api;
     return () => { /* keep global on unmount */ };
@@ -67,6 +95,12 @@ let minimapCanvas: HTMLCanvasElement;
   });
 
   // Volume slider: change real-time
+  $effect(() => {
+    // Detect mobile
+    isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    return () => {};
+  });
+
   function onVolumeChange(e: Event) {
     const v = parseFloat((e.target as HTMLInputElement).value);
     volume = v;
@@ -77,8 +111,49 @@ let minimapCanvas: HTMLCanvasElement;
   // Reset run
   function resetRun() {
     try { localStorage.removeItem('neongrid:fragments'); } catch {}
+    try { localStorage.removeItem('neongrid:run'); } catch {}
+    try { localStorage.removeItem('neongrid:high'); } catch {}
     location.reload();
   }
+
+  // Shop actions
+  function buyHp()    { (window as any).__game?.buyUpgrade('hp');    shopScore = (window as any).__game?.score ?? 0; }
+  function buyDash()  { (window as any).__game?.buyUpgrade('dash');  shopScore = (window as any).__game?.score ?? 0; }
+  function buyAtk()   { (window as any).__game?.buyUpgrade('attack'); shopScore = (window as any).__game?.score ?? 0; }
+  function buySpeed() { (window as any).__game?.buyUpgrade('speed'); shopScore = (window as any).__game?.score ?? 0; }
+  function closeShopNow() {
+    showShop = false;
+    (window as any).__game?.closeShop?.();
+  }
+
+  // Achievements list: load from localStorage on mount
+  function loadHighScores() {
+    try {
+      const raw = localStorage.getItem('neongrid:high');
+      if (raw) highScores = JSON.parse(raw);
+    } catch {}
+  }
+  $effect(() => { loadHighScores(); });
+
+  function respawn() {
+    (window as any).__game?.respawn?.();
+  }
+  function formatTimeShort(s: number) {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  }
+
+  // Mobile input injection
+  function mobiPress(code: string) {
+    (window as any).__game?.input?.press?.(code);
+  }
+  function mobiRelease(code: string) {
+    (window as any).__game?.input?.release?.(code);
+  }
+  function mobiClick() { (window as any).__game?.input?.attackEdge?.(); }
+  function mobiDash()  { (window as any).__game?.input?.dashEdge?.(); }
+  function mobiJump()  { (window as any).__game?.input?.jumpEdge?.(); }
 
   function formatTime(s: number) {
     const m = Math.floor(s / 60);
@@ -236,6 +311,44 @@ let minimapCanvas: HTMLCanvasElement;
     </div>
   {/if}
 
+  {#if showShop}
+    <div class="shop-overlay">
+      <div class="shop-title">SHOP</div>
+      <div class="shop-score">SCORE: {shopScore}</div>
+      <div class="shop-grid">
+        <button class="shop-item" onclick={buyHp}>
+          <div class="shop-icon">♥</div>
+          <div class="shop-name">+1 HP</div>
+          <div class="shop-cost">2000</div>
+        </button>
+        <button class="shop-item" onclick={buyDash}>
+          <div class="shop-icon">≫</div>
+          <div class="shop-name">DASH CD</div>
+          <div class="shop-cost">1000</div>
+        </button>
+        <button class="shop-item" onclick={buyAtk}>
+          <div class="shop-icon">✦</div>
+          <div class="shop-name">ATTACK</div>
+          <div class="shop-cost">1000</div>
+        </button>
+        <button class="shop-item" onclick={buySpeed}>
+          <div class="shop-icon">»</div>
+          <div class="shop-name">SPEED</div>
+          <div class="shop-cost">1000</div>
+        </button>
+      </div>
+      <button class="shop-close" onclick={closeShopNow}>CONTINUE</button>
+    </div>
+  {/if}
+
+  {#if justUnlocked}
+    <div class="ach-popup" role="alert">
+      <div class="ach-icon">★</div>
+      <div class="ach-name">{justUnlocked.replace(/_/g, ' ').toUpperCase()}</div>
+      <div class="ach-sub">ACHIEVEMENT UNLOCKED</div>
+    </div>
+  {/if}
+
   {#if showSettings}
     <div class="settings-overlay" onclick={() => showSettings = false} role="presentation">
       <div class="settings-card" onclick={(e) => e.stopPropagation()} role="presentation">
@@ -306,6 +419,30 @@ let minimapCanvas: HTMLCanvasElement;
     </div>
   {/if}
 
+  {#if isMobile && !showTutorial && !showSettings && !showShop && !showTransition && !gameOver && !victory}
+    <div class="mobile-controls">
+      <div class="dpad">
+        <button class="dpad-btn"
+          onpointerdown={() => mobiPress('KeyW')} onpointerup={() => mobiRelease('KeyW')}
+          onpointerleave={() => mobiRelease('KeyW')}>↑</button>
+        <button class="dpad-btn"
+          onpointerdown={() => mobiPress('KeyA')} onpointerup={() => mobiRelease('KeyA')}
+          onpointerleave={() => mobiRelease('KeyA')}>←</button>
+        <button class="dpad-btn"
+          onpointerdown={() => mobiPress('KeyS')} onpointerup={() => mobiRelease('KeyS')}
+          onpointerleave={() => mobiRelease('KeyS')}>↓</button>
+        <button class="dpad-btn"
+          onpointerdown={() => mobiPress('KeyD')} onpointerup={() => mobiRelease('KeyD')}
+          onpointerleave={() => mobiRelease('KeyD')}>→</button>
+      </div>
+      <div class="action-buttons">
+        <button class="action-btn" onpointerdown={() => mobiJump()}>⤴</button>
+        <button class="action-btn" onpointerdown={() => mobiDash()}>≫</button>
+        <button class="action-btn attack" onpointerdown={() => mobiClick()}>✦</button>
+      </div>
+    </div>
+  {/if}
+
   {#if victory && victoryData}
     <div class="victory-overlay">
       <div class="victory-card">
@@ -331,10 +468,32 @@ let minimapCanvas: HTMLCanvasElement;
   {/if}
 
   {#if gameOver}
-    <div class="game-over">
-      <div class="game-over-title">SYSTEM HALTED</div>
-      <div class="game-over-sub">the grid consumes another program</div>
-      <button class="game-over-btn" onclick={restart}>REBOOT</button>
+    <div class="gameover-overlay">
+      <div class="gameover-title">SYSTEM HALTED</div>
+      <div class="gameover-sub">// the grid consumes another program //</div>
+      <div class="gameover-stats">
+        <div class="gameover-stat"><span>SCORE</span><strong>{gameOverScore.toString().padStart(6, '0')}</strong></div>
+        <div class="gameover-stat"><span>LEVEL</span><strong>{gameOverLevel.toString().padStart(2, '0')}</strong></div>
+        <div class="gameover-stat"><span>BEST</span><strong>{gameOverBest.toString().padStart(6, '0')}</strong></div>
+      </div>
+      {#if highScores.length > 0}
+        <div class="high-scores">
+          <div class="hs-title">// HIGH SCORES //</div>
+          {#each highScores as entry, i}
+            <div class="hs-row">
+              <span class="hs-rank">#{i + 1}</span>
+              <span class="hs-name">{entry.name}</span>
+              <span class="hs-score">{entry.score.toString().padStart(6, '0')}</span>
+              <span class="hs-lv">L{entry.level.toString().padStart(2, '0')}</span>
+              <span class="hs-time">{formatTimeShort(entry.time)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      <div class="gameover-actions">
+        <button class="gameover-btn" onclick={respawn}>RESPAWN</button>
+        <button class="gameover-btn" onclick={resetRun}>REBOOT</button>
+      </div>
     </div>
   {/if}
 </div>
@@ -600,6 +759,230 @@ let minimapCanvas: HTMLCanvasElement;
     color: var(--cyan);
     opacity: 0.7;
     letter-spacing: 4px;
+  }
+  .shop-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    z-index: 20;
+    animation: fade-in 0.3s ease;
+  }
+  .shop-title {
+    font-size: 56px;
+    color: var(--orange);
+    text-shadow: 0 0 24px var(--orange);
+    letter-spacing: 12px;
+    margin-bottom: 8px;
+  }
+  .shop-score {
+    font-size: 16px;
+    color: var(--green);
+    text-shadow: 0 0 8px var(--green);
+    margin-bottom: 24px;
+  }
+  .shop-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .shop-item {
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 18px 24px;
+    min-width: 140px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+  .shop-item:hover { background: var(--cyan); color: black; }
+  .shop-icon { font-size: 32px; margin-bottom: 6px; }
+  .shop-name { font-size: 14px; letter-spacing: 2px; }
+  .shop-cost { font-size: 11px; opacity: 0.8; margin-top: 4px; }
+  .shop-close {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    padding: 10px 30px;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 4px;
+    cursor: pointer;
+    text-shadow: 0 0 6px var(--green);
+  }
+  .shop-close:hover { background: var(--green); color: black; text-shadow: none; }
+  .ach-popup {
+    position: absolute;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid var(--orange);
+    padding: 12px 24px;
+    text-align: center;
+    z-index: 30;
+    box-shadow: 0 0 24px var(--orange);
+    animation: ach-slide 3s ease forwards;
+  }
+  @keyframes ach-slide {
+    0%   { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+    10%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+    90%  { opacity: 1; }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+  }
+  .ach-icon { font-size: 28px; color: var(--orange); }
+  .ach-name { font-size: 18px; color: var(--orange); text-shadow: 0 0 12px var(--orange); letter-spacing: 4px; }
+  .ach-sub { font-size: 10px; color: var(--cyan); letter-spacing: 3px; }
+  .gameover-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    pointer-events: auto;
+    z-index: 25;
+    padding: 20px;
+  }
+  .gameover-title {
+    font-size: 56px;
+    color: var(--red);
+    text-shadow: 0 0 32px var(--red);
+    letter-spacing: 12px;
+    margin-bottom: 8px;
+  }
+  .gameover-sub {
+    font-size: 12px;
+    color: var(--cyan);
+    opacity: 0.7;
+    letter-spacing: 3px;
+    margin-bottom: 20px;
+  }
+  .gameover-stats {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .gameover-stat {
+    text-align: center;
+    border: 1px solid var(--cyan);
+    padding: 12px 20px;
+    background: rgba(0, 20, 30, 0.5);
+    min-width: 120px;
+  }
+  .gameover-stat span {
+    display: block;
+    font-size: 10px;
+    color: var(--cyan);
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .gameover-stat strong {
+    display: block;
+    font-size: 22px;
+    color: var(--orange);
+    text-shadow: 0 0 8px var(--orange);
+  }
+  .high-scores {
+    border: 1px solid var(--green);
+    padding: 12px 16px;
+    background: rgba(0, 30, 20, 0.5);
+    margin-bottom: 20px;
+    max-width: 480px;
+    width: 100%;
+  }
+  .hs-title {
+    font-size: 11px;
+    color: var(--green);
+    text-shadow: 0 0 6px var(--green);
+    letter-spacing: 3px;
+    margin-bottom: 8px;
+    text-align: center;
+  }
+  .hs-row {
+    display: grid;
+    grid-template-columns: 30px 1fr 90px 50px 60px;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+    color: var(--cyan);
+    align-items: center;
+  }
+  .hs-rank { color: var(--magenta); }
+  .hs-score { text-align: right; color: var(--orange); }
+  .hs-lv, .hs-time { text-align: center; opacity: 0.8; }
+  .gameover-actions { display: flex; gap: 16px; }
+  .gameover-btn {
+    background: transparent;
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 10px 30px;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 4px;
+    cursor: pointer;
+    text-shadow: 0 0 6px var(--cyan);
+  }
+  .gameover-btn:hover { background: var(--cyan); color: black; text-shadow: none; }
+  .mobile-controls {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 8;
+  }
+  .dpad {
+    position: absolute;
+    bottom: 40px;
+    left: 40px;
+    width: 180px;
+    height: 180px;
+    pointer-events: auto;
+    display: grid;
+    grid-template-columns: 60px 60px 60px;
+    grid-template-rows: 60px 60px 60px;
+  }
+  .dpad-btn {
+    background: rgba(0, 240, 255, 0.18);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    font-size: 24px;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .action-buttons {
+    position: absolute;
+    bottom: 60px;
+    right: 40px;
+    display: flex;
+    gap: 12px;
+    pointer-events: auto;
+  }
+  .action-btn {
+    background: rgba(0, 240, 255, 0.18);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    font-size: 22px;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .action-btn.attack {
+    background: rgba(255, 106, 0, 0.18);
+    border-color: var(--orange);
+    color: var(--orange);
+    width: 80px;
+    height: 80px;
   }
   .victory-overlay {
     position: absolute;

@@ -19,6 +19,7 @@ import { CameraController } from './CameraController';
 import { AudioBus } from './Audio';
 import { Component, generateComponents } from './Components';
 import { PALETTE } from './palette';
+import { Save, AchievementId, saveHighScores, saveRun, saveBestScore, saveFragments, loadSave, pushHighScore, ACHIEVEMENT_META } from './SaveSystem';
 
 // Re-seed Math.random with a tiny mulberry32 PRNG so the procedural world
 // generates a DIFFERENT layout per level. Called from startNextLevel().
@@ -50,6 +51,9 @@ type HudHandle = {
   getVolume: () => number;
   setLevel: (n: number) => void;
   setTransition: (v: boolean, label?: string) => void;
+  setShop: (v: boolean) => void;
+  setAchievements: (ids: AchievementId[]) => void;
+  setGameOverScore: (score: number, level: number, bestScore: number) => void;
 };
 
 export class Game {
@@ -58,7 +62,7 @@ export class Game {
   private camera!: THREE.PerspectiveCamera;
   private clock = new THREE.Clock();
   private postFX = new PostFX();
-  private input = new Input();
+  input = new Input();
 
   world!: World;
   hero!: Hero;
@@ -95,6 +99,22 @@ export class Game {
   private readonly STORAGE_VOL = 'neongrid:volume';
   private savedFragments: string[] = [];
   private bestScore = 0;
+  // Save system
+  private save: Save = loadSave();
+  // achievements unlocked this run
+  private achievements: AchievementId[] = [];
+  // boss variant per level
+  private bossVariant = 'octa';
+  // respawn tracking
+  private runStartTime = 0;
+  private levelStartTime = 0;
+  // damage tracking for flawless
+  private damageThisLevel = 0;
+  private enemiesKilledThisLevel = 0;
+  // shop offers
+  private shopOffer: 'hp' | 'dash' | 'attack' | 'speed' | null = null;
+  // game-over showing high-score entry
+  private gameOverScore = 0;
 
   // AABB for gate proximity
   private nearLore: string | null = null;
@@ -139,7 +159,8 @@ export class Game {
   get difficultyMul(): number { return 1 + (this.level - 1) * 0.5; }
 
   /** Start a new level: clear field, bump level, regenerate
-   *  components, more enemies, harder boss. */
+   *  components, more enemies, harder boss. After a cinematic reveal,
+   *  opens the shop so the player can spend score on upgrades. */
   private startNextLevel() {
     this.level++;
     this.hud.setTransition(false);
@@ -160,16 +181,11 @@ export class Game {
 
     // Remove old components from the scene
     for (const c of this.components) this.scene.remove(c.group);
-    // Re-seed: we want different layouts per level, so we add a level
-    // offset to Math.random by drawing a new random seed.
-    // Quickest way: shuffle by adding a new random factor to existing
-    // generator via a tiny PRNG seeded by level.
     seedRandom(this.level * 9173 + 42);
     this.components = generateComponents();
     for (const c of this.components) this.scene.add(c.group);
 
-    // Re-populate fragments (saving already-collected ones is OK; they
-    // are visually hidden but we keep them in this.fragments).
+    // Re-populate fragments
     for (const f of this.fragments) {
       f.collected = false;
       f.group.visible = true;
@@ -177,20 +193,176 @@ export class Game {
     this.fragmentsCollected = 0;
     this.hud.setFragments(0, this.fragmentsTotal);
 
-    // Add MORE enemies (drones, chargers) per level
+    // Add MORE enemies per level
     this.spawnExtraEnemies();
 
     // Reset the hero to the hub
     this.hero.group.position.set(0, 0, 0);
     this.hero.hp = this.hero.maxHp;
-    this.hero.hurt(0);  // noop reset of any timers (e.g. dash state)
+    this.hero.hurt(0);
+
+    // Pick a boss variant for this level (3 archetypes)
+    const variants = ['octa', 'spinblade', 'voidtank'];
+    this.bossVariant = variants[(this.level - 1) % variants.length];
+
+    // Reset per-level trackers
+    this.damageThisLevel = 0;
+    this.enemiesKilledThisLevel = 0;
+    this.levelStartTime = performance.now();
 
     // Music + UI
     this.hud.setLore(`// LEVEL ${this.level} // the grid has reconfigured. stay sharp.`);
     this.audio.ambientStart();
+
+    // Cinematic reveal
     this.cine.play([
       { focus: new THREE.Vector3(0, 0, -45), yaw: Math.PI, pitch: 0.45, distance: 22, t: 0 },
       { focus: new THREE.Vector3(0, 0, 0), yaw: this.camCtl.yaw, pitch: 0.6, distance: 28, t: 1.4 },
+    ]);
+
+    // After the cinematic, open the shop so the player can spend score.
+    // But only if the hero is still alive (the cinematic can overlap
+    // with a game-over if the boss from the new level insta-killed).
+    setTimeout(() => {
+      if (!this.gameOver && this.hero.hp > 0) this.openShop();
+    }, 1700);
+
+    // Persist the level reached.
+    this.save.run.currentLevel = this.level;
+    saveRun(this.save.run);
+  }
+
+  /** Open the shop overlay (called after the level cinematic). */
+  openShop() {
+    this.hud.setShop(true);
+  }
+
+  /** Close the shop. */
+  closeShop() { this.hud.setShop(false); }
+
+  /** Buy an upgrade if affordable. Returns true on success. */
+  buyUpgrade(kind: 'hp' | 'dash' | 'attack' | 'speed'): boolean {
+    const cost = 1000 * (kind === 'hp' ? 2 : 1);
+    if (this.score < cost) return false;
+    this.score -= cost;
+    this.hud.setScore(this.score);
+    const u = this.save.run.upgrades;
+    if (kind === 'hp' && u.maxHp < 10) {
+      u.maxHp += 1;
+      this.hero.maxHp = u.maxHp;
+      this.hero.hp = this.hero.maxHp;
+      this.hud.setHp(this.hero.hp, this.hero.maxHp);
+    } else if (kind === 'dash' && u.dashCdMul > 0.4) {
+      u.dashCdMul = Math.max(0.4, u.dashCdMul - 0.15);
+      this.hero.dashCdMul = u.dashCdMul;
+    } else if (kind === 'attack' && u.attackSpeedMul > 0.4) {
+      u.attackSpeedMul = Math.max(0.4, u.attackSpeedMul - 0.15);
+      this.hero.attackCdMul = u.attackSpeedMul;
+    } else if (kind === 'speed' && u.speedMul < 1.4) {
+      u.speedMul = Math.min(1.4, u.speedMul + 0.1);
+      this.hero.speedMul = u.speedMul;
+    } else {
+      // Already at max — refund
+      this.score += cost;
+      this.hud.setScore(this.score);
+      return false;
+    }
+    saveRun(this.save.run);
+    this.audio.hit();
+    return true;
+  }
+
+  /** Unlock an achievement (idempotent). */
+  unlockAchievement(id: AchievementId) {
+    if (this.achievements.includes(id)) return;
+    this.achievements.push(id);
+    // Persist to run save
+    this.save.run.achievements = this.achievements;
+    saveRun(this.save.run);
+    this.hud.setAchievements(this.achievements);
+    // Flash
+    this.hud.setLore(`// ACHIEVEMENT UNLOCKED: ${ACHIEVEMENT_META[id].name}`);
+    this.particles.burst(this.hero.group.position.clone().setY(1.5), PALETTE.cyan, 40, 6, 0.6);
+  }
+
+  /** Game over: save high score, persist, respawn at last level. */
+  private startGameOver() {
+    if (this.gameOver) return;
+    this.gameOver = true;
+    this.hud.setShop(false);
+    this.audio.ambientStop();
+    this.audio.hurt();
+    this.shake(0.5, 0.6);
+
+    // Speedrunner check (level 1 finished)
+    if (this.level === 1) {
+      const elapsed = (performance.now() - this.runStartTime) / 1000;
+      if (elapsed < 60) this.unlockAchievement('speedrunner');
+    }
+
+    // Pacifist: finished a level without dying (we're at the boss or just killed it; we know if hero.hp < max at any point in this level)
+    if (this.damageThisLevel === 0 && this.enemiesKilledThisLevel > 0) {
+      this.unlockAchievement('pacifist');
+    }
+
+    // Best score + high-score table
+    const newBest = Math.max(this.bestScore, this.score);
+    this.save.bestScore = newBest;
+    saveBestScore(newBest);
+
+    const totalTime = (performance.now() - this.runStartTime) / 1000;
+    const entry = {
+      name: this.save.run.heroName,
+      score: this.score,
+      level: this.level,
+      time: totalTime,
+      when: Date.now(),
+    };
+    this.save.highScores = pushHighScore(this.save.highScores, entry);
+    saveHighScores(this.save.highScores);
+    this.hud.setBestScore(newBest);
+
+    this.hud.setGameOverScore(this.score, this.level, newBest);
+    this.hud.setGameOver(true);
+
+    // Save the run state (level reached + upgrades) so respawn can restore.
+    this.save.run.currentLevel = this.level;
+    saveRun(this.save.run);
+  }
+
+  /** Respawn at the same level the player died on. */
+  respawn() {
+    // Reset run timer / per-level trackers
+    this.gameOver = false;
+    this.hud.setGameOver(false);
+    this.audio.ambientStart();
+    // Restore HP from upgrades
+    this.hero.maxHp = this.save.run.upgrades.maxHp;
+    this.hero.hp = this.hero.maxHp;
+    this.hero.dashCdMul = this.save.run.upgrades.dashCdMul;
+    this.hero.attackCdMul = this.save.run.upgrades.attackSpeedMul;
+    this.hero.speedMul = this.save.run.upgrades.speedMul;
+    this.hud.setHp(this.hero.hp, this.hero.maxHp);
+    // Reset world for the current level (re-generate components + boss)
+    this.damageThisLevel = 0;
+    this.enemiesKilledThisLevel = 0;
+    this.levelStartTime = performance.now();
+    this.fragmentsCollected = 0;
+    this.hud.setFragments(0, this.fragmentsTotal);
+    for (const f of this.fragments) { f.collected = false; f.group.visible = true; }
+    // Reset enemies
+    for (const c of this.components) this.scene.remove(c.group);
+    seedRandom(this.level * 9173 + 42);
+    this.components = generateComponents();
+    for (const c of this.components) this.scene.add(c.group);
+    this.bossSpawned = false;
+    this.bossDefeated = false;
+    this.boss = null;
+    this.hero.group.position.set(0, 0, 0);
+    this.hud.setLore(`// RESPAWN // level ${this.level} // the grid is patient.`);
+    this.cine.play([
+      { focus: new THREE.Vector3(0, 0, -45), yaw: Math.PI, pitch: 0.45, distance: 22, t: 0 },
+      { focus: new THREE.Vector3(0, 0, 0), yaw: this.camCtl.yaw, pitch: 0.55, distance: 14, t: 1.0 },
     ]);
   }
 
@@ -365,6 +537,18 @@ export class Game {
   };
 
   private tick(dt: number, t: number) {
+    // Cinematic lock: when the scripted camera is running (e.g. boss
+    // intro, level transition reveal), the entire world freezes. No
+    // input, no movement, no enemy AI, no damage, no scoring — only
+    // the camera plays its keyframes.
+    if (this.cine.running) {
+      // Drop any pending orbit input so it doesn't snap when the
+      // cinematic ends.
+      this.input.consumeOrbit();
+      this.cine.update(dt, t);
+      return;
+    }
+
     // Camera orbit input → controller
     const orbit = this.input.consumeOrbit();
     if (orbit.dx !== 0 || orbit.dy !== 0) this.camCtl.applyOrbit(orbit.dx, orbit.dy);
@@ -403,11 +587,6 @@ export class Game {
       this.camera.position.x += (Math.random() - 0.5) * this.shakeAmp;
       this.camera.position.y += (Math.random() - 0.5) * this.shakeAmp;
       this.shakeAmp *= 0.9;
-    }
-
-    // Cinematic: if running, override hero update and camera follow
-    if (this.cine.running) {
-      this.cine.update(dt, this.t);
     }
 
     // Fragments
@@ -484,6 +663,9 @@ export class Game {
       if (this.hero.disc.isActive() && this.hero.disc.hits(e.group.position, 0.8)) {
         const dead = e.hurt(1);
         if (dead) {
+          this.enemiesKilledThisLevel++;
+          // Track first blood achievement
+          if (this.enemiesKilledThisLevel === 1) this.unlockAchievement('first_blood');
           this.score += 250;
           this.hud.setScore(this.score);
           this.particles.burst(e.group.position.clone().setY(0.8), PALETTE.magenta, 60, 7, 0.9);
@@ -495,21 +677,23 @@ export class Game {
         }
       }
       if (e.alive && e.group.position.distanceTo(this.hero.group.position) < 1.4) {
+        this.damageThisLevel++;
         const dead = this.hero.hurt(1);
         this.hud.setHp(this.hero.hp, this.hero.maxHp);
         this.audio.hurt();
         this.shake(0.25, 0.3);
-        if (dead) { this.gameOver = true; this.hud.setGameOver(true); this.audio.ambientStop(); }
+        if (dead) this.startGameOver();
       }
       for (const p of e.projectiles) {
         if (p.mesh.position.distanceTo(this.hero.group.position) < 1.4) {
+          this.damageThisLevel++;
           p.life = 0;
           this.particles.burst(p.mesh.position.clone(), PALETTE.cyan, 14, 3, 0.4);
           const dead = this.hero.hurt(1);
           this.hud.setHp(this.hero.hp, this.hero.maxHp);
           this.audio.hurt();
           this.shake(0.2, 0.25);
-          if (dead) { this.gameOver = true; this.hud.setGameOver(true); this.audio.ambientStop(); }
+          if (dead) this.startGameOver();
         }
       }
     }
@@ -527,11 +711,12 @@ export class Game {
       }
       // Boss contact
       if (this.boss.alive && this.boss.group.position.distanceTo(this.hero.group.position) < 2.5) {
+        this.damageThisLevel++;
         const dead = this.hero.hurt(1);
         this.hud.setHp(this.hero.hp, this.hero.maxHp);
         this.audio.hurt();
         this.shake(0.4, 0.4);
-        if (dead) { this.gameOver = true; this.hud.setGameOver(true); this.audio.ambientStop(); }
+        if (dead) this.startGameOver();
       }
     }
 
@@ -545,7 +730,8 @@ export class Game {
 
   private spawnBoss() {
     this.bossSpawned = true;
-    this.boss = new Boss(new THREE.Vector3(0, 0, -90), this.level);
+    // Variant: octa (default), spinblade (faster ring), voidtank (slower tank)
+    this.boss = new Boss(new THREE.Vector3(0, 0, -90), this.level, this.bossVariant);
     this.scene.add(this.boss.group);
     this.hud.setBossHp(this.boss.hp, this.boss.maxHp);
     this.audio.warning();

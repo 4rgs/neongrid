@@ -88,4 +88,16 @@ export class Input {
   isRmbDown(): boolean { return this._rmbDown; }
 
   held(code: string): boolean { return this.keys.has(code); }
+
+  // --- Mobile / programmatic injection ---
+  press(code: string) { this.keys.add(code); this.markEdges(code); }
+  release(code: string) { this.keys.delete(code); }
+  private markEdges(code: string) {
+    if (code === 'Space') this._jumpEdge = true;
+    if (code === 'ShiftLeft' || code === 'ShiftRight') this._dashEdge = true;
+    if (code === 'KeyJ' || code === 'Mouse0') this._attackEdge = true;
+  }
+  attackEdge() { this._attackEdge = true; }
+  dashEdge() { this._dashEdge = true; }
+  jumpEdge() { this._jumpEdge = true; }
 }

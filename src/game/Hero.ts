@@ -70,6 +70,10 @@ export class Hero {
   armL!: THREE.Mesh;
   armR!: THREE.Mesh;
   disc!: Disc;
+  // Upgrade multipliers (driven by the shop)
+  dashCdMul = 1.0;
+  attackCdMul = 1.0;
+  speedMul = 1.0;
   private bodyGeoms: THREE.BufferGeometry[] = [];
 
   constructor() {
@@ -168,7 +172,7 @@ export class Hero {
   /** Try to start an attack. Throws disc in the direction the camera faces. */
   tryAttack(cameraYaw: number): boolean {
     if (this.attackCd > 0 || this.disc.state !== 'idle') return false;
-    this.attackCd = 0.5;
+    this.attackCd = 0.5 * this.attackCdMul;
     // Launch from WORLD position (not local) so the disc starts in front of
     // the hero regardless of pitch/roll on the terrain.
     const fwd = new THREE.Vector3(Math.sin(cameraYaw + Math.PI), 0, Math.cos(cameraYaw + Math.PI));
@@ -213,15 +217,15 @@ export class Hero {
     const len = moveDir.length();
     if (len > 0.01) moveDir.multiplyScalar(1 / len);
 
-    const baseSpeed = 7;
-    const dashSpeed = 22;
+    const baseSpeed = 7 * this.speedMul;
+    const dashSpeed = 22 * this.speedMul;
     let speed = baseSpeed;
 
     if (this.dashT > 0) {
       speed = dashSpeed;
     } else if (wantDash && this.dashCd <= 0 && len > 0.01) {
       this.dashT = 0.22;
-      this.dashCd = 0.9;
+      this.dashCd = 0.9 * this.dashCdMul;
       this.dashDir.copy(moveDir);
     }
 
