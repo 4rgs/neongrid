@@ -7,7 +7,12 @@ let fragmentsTotal = $state(0);
 let hp = $state(6);
 let hpMax = $state(6);
 let sector = $state('GRID HUB');
-let lore = $state<string | null>('W/S move · A/D orbit camera · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
+let lore = $state<string | null>(null);
+// Initial controls hint. Kept separate from the narrative `lore` so
+// the desktop controls banner can be hidden on mobile (the banner is
+// huge and would eat most of the screen) while narrative lores
+// ("// RESPAWN // the grid is patient", etc.) still appear.
+let controlsMessage = $state<string | null>('W/S move · A/D orbit camera · SHIFT dash · SPACE jump · J/LMB disc-whip · RMB drag to orbit · collect FRAGMENTS to unlock gates');
 let gameOver = $state(false);
 let paused = $state(false);
 let bossHp = $state(0);
@@ -163,8 +168,19 @@ let minimapCanvas: HTMLCanvasElement;
 
   // Volume slider: change real-time
   $effect(() => {
-    // Detect mobile
-    isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    // Detect mobile. Three signals: (1) the legacy `ontouchstart`
+    // event handler, (2) the modern maxTouchPoints > 0, and (3) a
+    // mobile user-agent. Any one of them flips the layout into
+    // touch-input mode. The UA check is what saves us on
+    // Playwright / headless browsers that emulate desktop Chrome
+    // but still need a touch UI.
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    const mobileUA = /Mobi|Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    // `?mobile=1` in the URL forces mobile mode regardless of UA —
+    // useful for development, browser devtools, and screenshot QA.
+    let forceMobile = false;
+    try { forceMobile = new URLSearchParams(window.location.search).get('mobile') === '1'; } catch {}
+    isMobile = forceMobile || mobileUA || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
     return () => {};
   });
 
@@ -221,6 +237,87 @@ let minimapCanvas: HTMLCanvasElement;
   function mobiClick() { (window as any).__game?.input?.attackEdge?.(); }
   function mobiDash()  { (window as any).__game?.input?.dashEdge?.(); }
   function mobiJump()  { (window as any).__game?.input?.jumpEdge?.(); }
+
+  // Virtual joystick. The thumb position relative to the base
+  // determines which of W/A/S/D to press (and combinations for
+  // diagonal movement). A 22% deadzone at the center keeps the
+  // hero still when the player rests their finger on the base.
+  // The base is 140px wide; the thumb can travel up to half that
+  // (70px) from center before being clamped at the rim.
+  const JOY_RADIUS = 70;
+  const JOY_DEADZONE = 0.22;
+  let joyBaseEl: HTMLDivElement | null = $state(null);
+  let joyThumbEl: HTMLDivElement | null = $state(null);
+  let joyActive = false;
+  let joyPointerId: number | null = null;
+  // Last direction the joystick emitted — used so we only release /
+  // re-press when the set of held keys actually changes.
+  let joyLastMask = 0;  // bit 0=W, 1=A, 2=S, 3=D
+
+  function joyApply(normX: number, normZ: number) {
+    // Compute the desired key mask from the joystick vector.
+    //   normX in [-1, 1]: -1 = left, +1 = right
+    //   normZ in [-1, 1]: -1 = up, +1 = down  (note: Z is screen-down)
+    //   The player pulls the thumb toward where they want to go, so
+    //   the resulting keys are: left → A, right → D, up → W, down → S.
+    const ax = Math.abs(normX), az = Math.abs(normZ);
+    let mask = 0;
+    if (az > JOY_DEADZONE) mask |= normZ < 0 ? 1 /* W */ : 4 /* S */;
+    if (ax > JOY_DEADZONE) mask |= normX < 0 ? 2 /* A */ : 8 /* D */;
+    if (mask === joyLastMask) return;
+    // Release any keys that were held but no longer needed.
+    const release = (code: string) => (window as any).__game?.input?.release?.(code);
+    const press   = (code: string) => (window as any).__game?.input?.press?.(code);
+    const old = joyLastMask;
+    if ((old & 1) && !(mask & 1)) release('KeyW');
+    if ((old & 2) && !(mask & 2)) release('KeyA');
+    if ((old & 4) && !(mask & 4)) release('KeyS');
+    if ((old & 8) && !(mask & 8)) release('KeyD');
+    if (!(old & 1) && (mask & 1)) press('KeyW');
+    if (!(old & 2) && (mask & 2)) press('KeyA');
+    if (!(old & 4) && (mask & 4)) press('KeyS');
+    if (!(old & 8) && (mask & 8)) press('KeyD');
+    joyLastMask = mask;
+  }
+
+  function joyMove(clientX: number, clientY: number) {
+    if (!joyBaseEl || !joyThumbEl) return;
+    const rect = joyBaseEl.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top  + rect.height / 2;
+    let dx = clientX - cx;
+    let dy = clientY - cy;
+    const dist = Math.hypot(dx, dy);
+    if (dist > JOY_RADIUS) {
+      const k = JOY_RADIUS / dist;
+      dx *= k; dy *= k;
+    }
+    joyThumbEl.style.transform = `translate(${dx}px, ${dy}px)`;
+    joyApply(dx / JOY_RADIUS, dy / JOY_RADIUS);
+  }
+
+  function joyStart(e: PointerEvent) {
+    if (joyActive) return;
+    joyActive = true;
+    joyPointerId = e.pointerId;
+    try { (e.target as Element).setPointerCapture(e.pointerId); } catch {}
+    joyMove(e.clientX, e.clientY);
+    e.preventDefault();
+  }
+  function joyDrag(e: PointerEvent) {
+    if (!joyActive || e.pointerId !== joyPointerId) return;
+    joyMove(e.clientX, e.clientY);
+    e.preventDefault();
+  }
+  function joyEnd(e: PointerEvent) {
+    if (e.pointerId !== joyPointerId && joyPointerId !== null) return;
+    joyActive = false;
+    joyPointerId = null;
+    if (joyThumbEl) joyThumbEl.style.transform = 'translate(0px, 0px)';
+    joyApply(0, 0);
+    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch {}
+    e.preventDefault();
+  }
 
   function formatTime(s: number) {
     const m = Math.floor(s / 60);
@@ -384,6 +481,10 @@ let minimapCanvas: HTMLCanvasElement;
 
   {#if lore}
     <div class="hud-lore">{lore}</div>
+  {/if}
+
+  {#if controlsMessage && !isMobile}
+    <div class="hud-controls">{controlsMessage}</div>
   {/if}
 
   {#if showLeaderboardPage}
@@ -638,19 +739,15 @@ let minimapCanvas: HTMLCanvasElement;
 
   {#if isMobile && !showTutorial && !showSettings && !showShop && !showTransition && !gameOver && !victory}
     <div class="mobile-controls">
-      <div class="dpad">
-        <button class="dpad-btn"
-          onpointerdown={() => mobiPress('KeyW')} onpointerup={() => mobiRelease('KeyW')}
-          onpointerleave={() => mobiRelease('KeyW')}>↑</button>
-        <button class="dpad-btn"
-          onpointerdown={() => mobiPress('KeyA')} onpointerup={() => mobiRelease('KeyA')}
-          onpointerleave={() => mobiRelease('KeyA')}>←</button>
-        <button class="dpad-btn"
-          onpointerdown={() => mobiPress('KeyS')} onpointerup={() => mobiRelease('KeyS')}
-          onpointerleave={() => mobiRelease('KeyS')}>↓</button>
-        <button class="dpad-btn"
-          onpointerdown={() => mobiPress('KeyD')} onpointerup={() => mobiRelease('KeyD')}
-          onpointerleave={() => mobiRelease('KeyD')}>→</button>
+      <div class="joystick"
+        bind:this={joyBaseEl}
+        onpointerdown={joyStart}
+        onpointermove={joyDrag}
+        onpointerup={joyEnd}
+        onpointercancel={joyEnd}
+        role="application"
+        aria-label="Movement joystick">
+        <div class="joystick-thumb" bind:this={joyThumbEl}></div>
       </div>
       <div class="action-buttons">
         <button class="action-btn" onpointerdown={() => mobiJump()}>⤴</button>
@@ -1176,6 +1273,19 @@ let minimapCanvas: HTMLCanvasElement;
     from { opacity: 0; transform: translate(-50%, 6px); }
     to   { opacity: 1; transform: translate(-50%, 0); }
   }
+  .hud-controls {
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 20, 30, 0.7);
+    border: 1px solid var(--cyan);
+    padding: 10px 18px;
+    font-size: 13px;
+    letter-spacing: 1px;
+    max-width: 60vw;
+    text-align: center;
+  }
 
   .pause-overlay {
     position: absolute;
@@ -1594,24 +1704,35 @@ let minimapCanvas: HTMLCanvasElement;
     pointer-events: none;
     z-index: 8;
   }
-  .dpad {
+  .joystick {
     position: absolute;
     bottom: 40px;
     left: 40px;
-    width: 180px;
-    height: 180px;
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid rgba(0, 240, 255, 0.45);
     pointer-events: auto;
-    display: grid;
-    grid-template-columns: 60px 60px 60px;
-    grid-template-rows: 60px 60px 60px;
-  }
-  .dpad-btn {
-    background: rgba(0, 240, 255, 0.18);
-    border: 1px solid var(--cyan);
-    color: var(--cyan);
-    font-size: 24px;
-    cursor: pointer;
     touch-action: none;
+    user-select: none;
+    box-shadow: 0 0 18px rgba(0, 240, 255, 0.15) inset;
+  }
+  .joystick-thumb {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 56px;
+    height: 56px;
+    margin-left: -28px;
+    margin-top: -28px;
+    border-radius: 50%;
+    background: rgba(0, 240, 255, 0.35);
+    border: 1px solid var(--cyan);
+    box-shadow: 0 0 14px rgba(0, 240, 255, 0.5);
+    transform: translate(0, 0);
+    will-change: transform;
+    pointer-events: none;
   }
   .action-buttons {
     position: absolute;
