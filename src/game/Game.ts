@@ -586,8 +586,8 @@ export class Game {
     const turnLeft  = this.input.held('KeyA') || this.input.held('KeyQ') || this.input.held('ArrowLeft');
     const turnRight = this.input.held('KeyD') || this.input.held('KeyE') || this.input.held('ArrowRight');
     const ORBIT_SPEED = 2.2; // rad/sec; ~126°/s
-    if (turnLeft && !hasForward)  this.camCtl.applyOrbit( ORBIT_SPEED * 60 * dt, 0);
-    if (turnRight && !hasForward) this.camCtl.applyOrbit(-ORBIT_SPEED * 60 * dt, 0);
+    if (turnLeft && !hasForward)  this.camCtl.applyOrbit(-ORBIT_SPEED * 60 * dt, 0);
+    if (turnRight && !hasForward) this.camCtl.applyOrbit( ORBIT_SPEED * 60 * dt, 0);
     // Vertical camera tilt via R/F
     if (this.input.held('KeyR')) this.camCtl.applyOrbit(0,  1.0 * 60 * dt);
     if (this.input.held('KeyF')) this.camCtl.applyOrbit(0, -1.0 * 60 * dt);
