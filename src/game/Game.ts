@@ -197,6 +197,20 @@ export class Game {
   /** Public: the AudioBus instance so the HUD can adjust volume. */
   getAudio() { return this.audio; }
 
+  /**
+   * Music helper: bring up the gameplay loop, crossfading from
+   * the boss loop if that's what was playing (level cleared,
+   * respawn, restart). Safe to call from any reset path — the
+   * AudioBus handles the crossfade timing internally.
+   */
+  private startGameplayMusic() {
+    // crossfadeTo('A') no-ops if A is already current, fades from
+    // B→A if the boss loop was playing, fades from silence→A if
+    // nothing is playing. Cheaper than calling playGameplayLoop
+    // directly because the latter would skip the crossfade.
+    this.audio.crossfadeTo('A', 1.0).catch(() => {});
+  }
+
   /** Multiplier applied to enemy hp / damage as level rises. */
   get difficultyMul(): number { return 1 + (this.level - 1) * 0.5; }
 
@@ -331,7 +345,7 @@ export class Game {
 
     // Music + UI
     this.hud.setLore(`// LEVEL ${this.level} // the grid has reconfigured. stay sharp.`);
-    this.audio.ambientStart();
+    this.startGameplayMusic();
 
     // Cinematic reveal
     this.cine.play([
@@ -451,7 +465,7 @@ export class Game {
     // that killed them. Hero + boss contact are wiped in clearField.
     this.clearField();
     this.hud.setShop(false);
-    this.audio.ambientStop();
+    this.audio.stopMusic();
     this.audio.hurt();
     this.shake(0.5, 0.6);
 
@@ -567,7 +581,7 @@ export class Game {
     this.hud.setGameOver(false);
     this.hud.setShop(false);
     this.shopOpen = false;
-    this.audio.ambientStart();
+    this.startGameplayMusic();
 
     // Reset run upgrades (the player keeps their best score & avatar)
     this.save.run.upgrades = { ...DEFAULT_UPGRADES };
@@ -631,7 +645,7 @@ export class Game {
     // Reset run timer / per-level trackers
     this.gameOver = false;
     this.hud.setGameOver(false);
-    this.audio.ambientStart();
+    this.startGameplayMusic();
     // Restore HP from upgrades
     this.hero.maxHp = this.save.run.upgrades.maxHp;
     this.hero.hp = this.hero.maxHp;
@@ -785,9 +799,15 @@ export class Game {
     window.addEventListener('wheel', (e) => {
       this.camCtl.applyZoom(-e.deltaY);
     }, { passive: true });
-    // Start ambient on first user gesture
+    // Start music on first user gesture. We also kick off the
+    // music decode (preloadMusic) so the actual playback start
+    // is instant — the await happens entirely in the background
+    // between the gesture and the player reaching gameplay.
     const startAudio = () => {
-      this.audio.ambientStart();
+      this.audio.playGameplayLoop();
+      // Fire-and-forget: errors inside preload are already
+      // logged by AudioBus.loadTrack.
+      this.audio.preloadMusic().catch(() => {});
       window.removeEventListener('keydown', startAudio);
       window.removeEventListener('mousedown', startAudio);
     };
@@ -804,8 +824,8 @@ export class Game {
     if (this.input.consumePause() && !this.gameOver) {
       this.paused = !this.paused;
       this.hud.setPaused(this.paused);
-      if (this.paused) this.audio.ambientStop();
-      else this.audio.ambientStart();
+      if (this.paused) this.audio.stopMusic();
+      else this.startGameplayMusic();
     }
 
     if (!this.paused && !this.gameOver) this.tick(dt, this.t);
@@ -818,12 +838,13 @@ export class Game {
       this.cine.update(dt, this.t);
     }
     // Music always advances (even on game over) for atmosphere
-    this.audio.musicTick(dt);
+    // (The old synth-music tick / intensity are gone — the music
+    // is now a pre-decoded OGG Opus buffer that loops itself.)
     // Music intensity rises during boss fight
     if (this.boss && this.boss.alive) {
-      this.audio.musicIntensity(2.0);
-    } else {
-      this.audio.musicIntensity(1.0);
+      // (no-op for the new MP3-driven system; the boss loop is
+      // already playing because finalizeFragmentRun() crossfaded
+      // to B when the last fragment was collected.)
     }
     this.postFX.setPulse(this.world.getPulse());
     this.postFX.composer.render(dt);
@@ -882,7 +903,11 @@ export class Game {
       this.particles.burst(this.boss.group.position.clone().setY(2), PALETTE.orange, 200, 12, 1.5);
       this.audio.boom();
       this.audio.victory();
-      this.audio.ambientStop();
+      // Music: crossfade back from the boss loop to the gameplay
+      // loop. Runs in the background; gameplay keeps going under
+      // the slow-zoom outro so the player hears the level-up music
+      // come in before startNextLevel() resets the field.
+      this.audio.crossfadeTo('A', 1.5).catch(() => {});
       this.saveBestScore(this.score);
       this.hud.setTransition(true, `LEVEL ${this.level} CLEARED`);
       // Outro cinematic: slow-zoom out from the dead boss. Starts at
@@ -1122,6 +1147,10 @@ export class Game {
     this.particles.burst(this.hero.group.position.clone().setY(1.5), PALETTE.cyan, 120, 8, 1.2);
     // Audio: warning + chord
     this.audio.warning();
+    // Music: crossfade from the gameplay loop to the boss-arena
+    // loop. Runs in the background; takes ~1.5s, so by the time
+    // spawnBoss() runs 1.6s later the boss loop is at full volume.
+    this.audio.crossfadeTo('B', 1.5).catch(() => {});
 
     // Camera transition: from the gameplay view (looking at the hero)
     // to a wide shot of the boss spawn position (0, 1.5, -90). The
